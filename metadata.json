@@ -1,0 +1,6 @@
+{
+  "name": "MenuMind AI — Restaurant Demand & Profit Intelligence",
+  "description": "AI-powered restaurant menu intelligence, sales aggregation, dish normalization, demand forecasting, and menu engineering from Petpooja POS reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
