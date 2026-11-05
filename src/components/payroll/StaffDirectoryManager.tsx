@@ -1,3 +1,4 @@
+import { appUrl } from '../../lib/appUrl';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -85,7 +86,7 @@ export const StaffDirectoryManager: React.FC<StaffDirectoryManagerProps> = ({
     }
     setIsPullingCloud(true);
     try {
-      const res = await fetch('/api/supabase/pull');
+      const res = await fetch(appUrl('/api/supabase/pull'));
       const data = await res.json();
       if (res.ok && data.success && data.data) {
         if (Array.isArray(data.data.staffDirectory) && data.data.staffDirectory.length > 0) {

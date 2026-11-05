@@ -1,3 +1,4 @@
+import { appUrl } from '../../lib/appUrl';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -142,7 +143,7 @@ Click any preset query below or type your question.`,
         },
       };
 
-      const res = await fetch('/api/gemini/advisor', {
+      const res = await fetch(appUrl('/api/gemini/advisor'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

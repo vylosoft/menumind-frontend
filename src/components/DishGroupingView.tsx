@@ -1,3 +1,4 @@
+import { appUrl } from '../lib/appUrl';
 import React, { useState } from 'react';
 import { GroupingRule, ParentDish, RawSalesRecord } from '../types/restaurant';
 import { canMergeSafely, getSavedGroupingRules, saveGroupingRules } from '../utils/dishNormalizer';
@@ -236,7 +237,7 @@ export const DishGroupingView: React.FC<DishGroupingViewProps> = ({
         d.variants.forEach((v) => rawNames.push(v.rawName));
       });
 
-      const response = await fetch('/api/gemini/suggest-grouping', {
+      const response = await fetch(appUrl('/api/gemini/suggest-grouping'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemNames: rawNames.slice(0, 30) }),

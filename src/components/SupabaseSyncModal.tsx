@@ -1,3 +1,4 @@
+import { appUrl } from '../lib/appUrl';
 import React, { useState, useEffect } from 'react';
 import {
   Database,
@@ -100,7 +101,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/supabase/status');
+      const res = await fetch(appUrl('/api/supabase/status'));
       const data = await res.json();
       setStatus(data);
     } catch (err: any) {
@@ -157,7 +158,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
     setSyncing(true);
     setSyncResult(null);
     try {
-      const res = await fetch('/api/supabase/sync', {
+      const res = await fetch(appUrl('/api/supabase/sync'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -206,7 +207,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
     setPulling(true);
     setSyncResult(null);
     try {
-      const res = await fetch('/api/supabase/pull');
+      const res = await fetch(appUrl('/api/supabase/pull'));
       const data = await res.json();
       if (res.ok && data.success && data.data) {
         if (onDataLoadedFromCloud) {
@@ -233,7 +234,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
     }
   };
 
-  const connectionUri = `postgresql://postgres.ognarhapvjisjespxdlc:Riju@389022@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`;
+  const connectionUri = `postgresql://postgres.ognarhapvjisjespxdlc:[YOUR-DB-PASSWORD]@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`;
 
   const copyConnectionUri = () => {
     navigator.clipboard.writeText(connectionUri);

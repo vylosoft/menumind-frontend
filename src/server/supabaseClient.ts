@@ -14,7 +14,7 @@ function resolveDbConfig(customConfig?: {
   let host = customConfig?.host || process.env.SUPABASE_DB_HOST || 'aws-0-eu-west-1.pooler.supabase.com';
   let port = Number(customConfig?.port || process.env.SUPABASE_DB_PORT) || 5432;
   let user = customConfig?.user || process.env.SUPABASE_DB_USER || 'postgres.ognarhapvjisjespxdlc';
-  let password = customConfig?.password || process.env.SUPABASE_DB_PASSWORD || 'Riju@389022';
+  let password = customConfig?.password || process.env.SUPABASE_DB_PASSWORD || '';
   let database = customConfig?.database || process.env.SUPABASE_DB_NAME || 'postgres';
 
   // Sanitize: Supabase database name is always 'postgres'
@@ -32,9 +32,9 @@ function resolveDbConfig(customConfig?: {
     user = 'postgres.ognarhapvjisjespxdlc';
   }
 
-  // Ensure working Supabase database password
-  if (password === 'Riju@3890223' || password === 'YOUR_SUPABASE_PASSWORD' || !password) {
-    password = 'Riju@389022';
+  // The database password must come from the environment (SUPABASE_DB_PASSWORD); it is never stored in code.
+  if (!password || password === 'YOUR_SUPABASE_PASSWORD') {
+    console.error('SUPABASE_DB_PASSWORD is not set: Supabase database connection will fail.');
   }
 
   return { host, port, user, password, database };

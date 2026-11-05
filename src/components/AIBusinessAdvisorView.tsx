@@ -1,3 +1,4 @@
+import { appUrl } from '../lib/appUrl';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ParentDish, ReconciliationReport } from '../types/restaurant';
 import { DishRecipe, FixedOperatingCosts } from '../types/recipe';
@@ -160,7 +161,7 @@ Ask me any financial or operational questions regarding recipe food costs, contr
     setErrorBanner(null);
 
     try {
-      const res = await fetch('/api/gemini/advisor', {
+      const res = await fetch(appUrl('/api/gemini/advisor'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

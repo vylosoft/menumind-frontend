@@ -1,3 +1,4 @@
+import { appUrl } from '../../lib/appUrl';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -66,7 +67,7 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
     setIsPullingCloud(true);
     setCloudNotification(null);
     try {
-      const res = await fetch('/api/supabase/pull');
+      const res = await fetch(appUrl('/api/supabase/pull'));
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data?.cateringOrders) && json.data.cateringOrders.length > 0) {

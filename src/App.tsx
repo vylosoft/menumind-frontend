@@ -1,3 +1,4 @@
+import { appUrl } from './lib/appUrl';
 import React, { useState, useMemo, useEffect } from 'react';
 import { posSalesApi, payoutsApi } from './lib/ingestionApi';
 import {
@@ -221,7 +222,7 @@ export default function App() {
     let isCancelled = false;
     const autoPullFromSupabase = async () => {
       try {
-        const res = await fetch('/api/supabase/pull');
+        const res = await fetch(appUrl('/api/supabase/pull'));
         if (!res.ok) return;
         const result = await res.json();
         if (isCancelled || !result.success || !result.data) return;
@@ -312,7 +313,7 @@ export default function App() {
   const handleManualPullSupabase = async () => {
     try {
       showToast('Retrieving latest records from Supabase tables...');
-      const res = await fetch('/api/supabase/pull');
+      const res = await fetch(appUrl('/api/supabase/pull'));
       const result = await res.json();
       if (res.ok && result.success && result.data) {
         const cloud = result.data;
