@@ -276,6 +276,30 @@ export default function App() {
     };
   }, []);
 
+  // Re-reads every saved POS upload from the database so the screen never shows stale or doubled rows.
+  const applyStoredSales = (records: RawSalesRecord[]) => {
+    const { mergedRecords, reconciliation: rec } = mergeSalesRecords(
+      Object.entries(
+        records.reduce<Record<string, RawSalesRecord[]>>((acc, r) => {
+          (acc[r.sourceFile] ||= []).push(r);
+          return acc;
+        }, {})
+      ).map(([fileName, recs]) => ({ fileName, records: recs, invalidCount: 0 }))
+    );
+    setRawRecords(mergedRecords);
+    setReconciliation(rec);
+    return rec;
+  };
+
+  const reloadSalesFromDb = async () => {
+    try {
+      const records = await posSalesApi.fetchAllRecords();
+      if (records.length > 0) applyStoredSales(records);
+    } catch (err: any) {
+      showToast(`Could not reload saved sales: ${err?.message || 'unknown error'}`);
+    }
+  };
+
   // Hydrate POS sales & platform payouts from the MenuMind API (database is the source of truth)
   useEffect(() => {
     let cancelled = false;
@@ -407,6 +431,8 @@ export default function App() {
     }
 
     // Records were already parsed and persisted by the MenuMind API during upload.
+    // Show everything that is saved (all months / files), not only this upload.
+    void reloadSalesFromDb();
   };
 
   // Handler to load demo dataset on demand

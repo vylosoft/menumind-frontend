@@ -237,9 +237,8 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
       replace: overrides.replace,
     });
 
-    const replacedFiles = new Set(result.files.map((f) => f.fileName));
-    const remaining = payouts.filter((p) => !(p.sourceFileName && replacedFiles.has(p.sourceFileName)));
-    onUpdatePayouts([...remaining, ...result.payouts]);
+    // The database decides what is stored (replaced / added to the month); show exactly that.
+    onUpdatePayouts(await payoutsApi.fetchAll());
     setMatchRefreshKey((k) => k + 1);
 
     const fileInfo = result.files[0];
@@ -268,7 +267,7 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
           break;
         } catch (err: any) {
           if (err instanceof ApiError && err.status === 409 && !overrides.replace &&
-              window.confirm(`"${file.name}" was already uploaded. Replace the stored statement?`)) {
+              window.confirm(`${err.message}\n\nOK = replace the stored statement with "${file.name}".\nCancel = keep the stored data and add nothing.`)) {
             overrides.replace = true;
             continue;
           }
@@ -308,7 +307,7 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
 
     try {
       await payoutsApi.deleteBatch(target.batchId);
-      onUpdatePayouts(payouts.filter((p) => p.batchId !== target.batchId));
+      onUpdatePayouts(await payoutsApi.fetchAll());
       setUploadSuccessMessage(`Deleted "${target.sourceFileName}".`);
     } catch (err: any) {
       setUploadError(err?.message || 'Failed to delete payout statement.');

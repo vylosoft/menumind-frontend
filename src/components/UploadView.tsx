@@ -627,7 +627,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
     } catch (err: any) {
       if (err instanceof ApiError && err.status === 409 && !replace) {
         const names = Array.isArray(err.invalid) ? err.invalid.map((d: any) => d.fileName).join(', ') : 'These files';
-        if (window.confirm(`${names} already uploaded. Replace the stored data with this upload?`)) {
+        if (window.confirm(`${err.message}\n\nAlready saved: ${names}\n\nOK = replace the saved data with this upload.\nCancel = keep the saved data and add nothing.`)) {
           setIsProcessing(false);
           await handleConfirmAndProcess(true);
           return;
