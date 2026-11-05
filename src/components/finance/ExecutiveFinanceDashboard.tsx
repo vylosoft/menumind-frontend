@@ -43,20 +43,6 @@ interface ExecutiveFinanceDashboardProps {
   onOpenMonthEndModal: () => void;
 }
 
-/** Shows whether the Consolidated figure equals Banaswadi + Whitefield (₹1 rounding allowed). */
-const SumCheck: React.FC<{ total: number; a: number; b: number }> = ({ total, a, b }) => {
-  const diff = Math.round((Number(total) || 0) - (Number(a) || 0) - (Number(b) || 0));
-  const ok = Math.abs(diff) <= 1;
-  return (
-    <span
-      className={`ml-1.5 text-[10px] font-semibold ${ok ? 'text-emerald-600' : 'text-amber-600'}`}
-      title={ok ? 'Banaswadi + Whitefield' : `Differs from Banaswadi + Whitefield by ${diff}`}
-    >
-      {ok ? '✅ (sum)' : `⚠ ≠ sum (${diff > 0 ? '+' : ''}${diff.toLocaleString('en-IN')})`}
-    </span>
-  );
-};
-
 export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps> = ({
   currentOutlet,
   onSelectOutlet,
@@ -401,7 +387,7 @@ export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps>
                 <td className="py-3 px-4 text-right font-semibold">{formatINR(pnlBanaswadi.grossSalesPetpooja)}</td>
                 <td className="py-3 px-4 text-right font-semibold">{formatINR(pnlWhitefield.grossSalesPetpooja)}</td>
                 <td className="py-3 px-4 text-right font-bold text-slate-900 bg-slate-50/50">
-                  {formatINR(pnlConsolidated.grossSalesPetpooja)}<SumCheck total={pnlConsolidated.grossSalesPetpooja} a={pnlBanaswadi.grossSalesPetpooja} b={pnlWhitefield.grossSalesPetpooja} />
+                  {formatINR(pnlConsolidated.grossSalesPetpooja)}
                 </td>
               </tr>
               <tr>
@@ -409,7 +395,7 @@ export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps>
                 <td className="py-3 px-4 text-right">{pnlBanaswadi.totalOrders} bills</td>
                 <td className="py-3 px-4 text-right">{pnlWhitefield.totalOrders} bills</td>
                 <td className="py-3 px-4 text-right font-bold bg-slate-50/50">
-                  {pnlConsolidated.totalOrders} bills<SumCheck total={pnlConsolidated.totalOrders} a={pnlBanaswadi.totalOrders} b={pnlWhitefield.totalOrders} />
+                  {pnlConsolidated.totalOrders} bills
                 </td>
               </tr>
               <tr>
@@ -417,7 +403,7 @@ export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps>
                 <td className="py-3 px-4 text-right font-semibold">{formatINR(pnlBanaswadi.netSalesRevenue)}</td>
                 <td className="py-3 px-4 text-right font-semibold">{formatINR(pnlWhitefield.netSalesRevenue)}</td>
                 <td className="py-3 px-4 text-right font-bold text-slate-900 bg-slate-50/50">
-                  {formatINR(pnlConsolidated.netSalesRevenue)}<SumCheck total={pnlConsolidated.netSalesRevenue} a={pnlBanaswadi.netSalesRevenue} b={pnlWhitefield.netSalesRevenue} />
+                  {formatINR(pnlConsolidated.netSalesRevenue)}
                 </td>
               </tr>
               <tr>
@@ -425,7 +411,7 @@ export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps>
                 <td className="py-3 px-4 text-right">{formatINR(pnlBanaswadi.totalCOGS)} ({formatPct(pnlBanaswadi.rawMaterialPercentage + pnlBanaswadi.packagingPercentage)})</td>
                 <td className="py-3 px-4 text-right">{formatINR(pnlWhitefield.totalCOGS)} ({formatPct(pnlWhitefield.rawMaterialPercentage + pnlWhitefield.packagingPercentage)})</td>
                 <td className="py-3 px-4 text-right font-bold bg-slate-50/50">
-                  {formatINR(pnlConsolidated.totalCOGS)}<SumCheck total={pnlConsolidated.totalCOGS} a={pnlBanaswadi.totalCOGS} b={pnlWhitefield.totalCOGS} />
+                  {formatINR(pnlConsolidated.totalCOGS)}
                 </td>
               </tr>
               <tr>
@@ -433,7 +419,7 @@ export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps>
                 <td className="py-3 px-4 text-right">{formatINR(pnlBanaswadi.totalVariableChannelCosts)}</td>
                 <td className="py-3 px-4 text-right">{formatINR(pnlWhitefield.totalVariableChannelCosts)}</td>
                 <td className="py-3 px-4 text-right font-bold bg-slate-50/50">
-                  {formatINR(pnlConsolidated.totalVariableChannelCosts)}<SumCheck total={pnlConsolidated.totalVariableChannelCosts} a={pnlBanaswadi.totalVariableChannelCosts} b={pnlWhitefield.totalVariableChannelCosts} />
+                  {formatINR(pnlConsolidated.totalVariableChannelCosts)}
                 </td>
               </tr>
               <tr className="bg-indigo-50/40">
@@ -445,7 +431,7 @@ export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps>
                   {formatINR(pnlWhitefield.contributionMargin)} ({formatPct(pnlWhitefield.contributionMarginPercentage)})
                 </td>
                 <td className="py-3 px-4 text-right font-black text-indigo-950 bg-indigo-100/50">
-                  {formatINR(pnlConsolidated.contributionMargin)}<SumCheck total={pnlConsolidated.contributionMargin} a={pnlBanaswadi.contributionMargin} b={pnlWhitefield.contributionMargin} /> ({formatPct(pnlConsolidated.contributionMarginPercentage)})
+                  {formatINR(pnlConsolidated.contributionMargin)} ({formatPct(pnlConsolidated.contributionMarginPercentage)})
                 </td>
               </tr>
               <tr>
@@ -453,7 +439,7 @@ export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps>
                 <td className="py-3 px-4 text-right">{formatINR(pnlBanaswadi.totalFixedOperatingExpenses)}</td>
                 <td className="py-3 px-4 text-right">{formatINR(pnlWhitefield.totalFixedOperatingExpenses)}</td>
                 <td className="py-3 px-4 text-right font-bold bg-slate-50/50">
-                  {formatINR(pnlConsolidated.totalFixedOperatingExpenses)}<SumCheck total={pnlConsolidated.totalFixedOperatingExpenses} a={pnlBanaswadi.totalFixedOperatingExpenses} b={pnlWhitefield.totalFixedOperatingExpenses} />
+                  {formatINR(pnlConsolidated.totalFixedOperatingExpenses)}
                 </td>
               </tr>
               <tr className={pnlConsolidated.operatingProfitOrLoss >= 0 ? 'bg-emerald-50/60' : 'bg-rose-50/60'}>
@@ -465,7 +451,7 @@ export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps>
                   {formatINR(pnlWhitefield.operatingProfitOrLoss)} ({formatPct(pnlWhitefield.operatingProfitMarginPercentage)})
                 </td>
                 <td className={`py-3.5 px-4 text-right font-black text-sm ${pnlConsolidated.operatingProfitOrLoss >= 0 ? 'text-emerald-800 bg-emerald-100/70' : 'text-rose-800 bg-rose-100/70'}`}>
-                  {formatINR(pnlConsolidated.operatingProfitOrLoss)}<SumCheck total={pnlConsolidated.operatingProfitOrLoss} a={pnlBanaswadi.operatingProfitOrLoss} b={pnlWhitefield.operatingProfitOrLoss} /> ({formatPct(pnlConsolidated.operatingProfitMarginPercentage)})
+                  {formatINR(pnlConsolidated.operatingProfitOrLoss)} ({formatPct(pnlConsolidated.operatingProfitMarginPercentage)})
                 </td>
               </tr>
             </tbody>
