@@ -280,7 +280,8 @@ export const FinanceCommandCenter: React.FC<FinanceCommandCenterProps> = ({
       staffDirectory,
       purchases,
       inventorySnapshots,
-      costingBasis
+      costingBasis,
+      rawRecords
     );
   }, [
     selectedMonth,
@@ -294,6 +295,7 @@ export const FinanceCommandCenter: React.FC<FinanceCommandCenterProps> = ({
     purchases,
     inventorySnapshots,
     costingBasis,
+    rawRecords,
   ]);
 
   const pnlWhitefield = useMemo(() => {
@@ -310,7 +312,8 @@ export const FinanceCommandCenter: React.FC<FinanceCommandCenterProps> = ({
       staffDirectory,
       purchases,
       inventorySnapshots,
-      costingBasis
+      costingBasis,
+      rawRecords
     );
   }, [
     selectedMonth,
@@ -324,6 +327,7 @@ export const FinanceCommandCenter: React.FC<FinanceCommandCenterProps> = ({
     purchases,
     inventorySnapshots,
     costingBasis,
+    rawRecords,
   ]);
 
   const pnlConsolidated = useMemo(() => {
@@ -340,7 +344,8 @@ export const FinanceCommandCenter: React.FC<FinanceCommandCenterProps> = ({
       staffDirectory,
       purchases,
       inventorySnapshots,
-      costingBasis
+      costingBasis,
+      rawRecords
     );
   }, [
     selectedMonth,
@@ -354,6 +359,7 @@ export const FinanceCommandCenter: React.FC<FinanceCommandCenterProps> = ({
     purchases,
     inventorySnapshots,
     costingBasis,
+    rawRecords,
   ]);
 
   const activePnl =

@@ -1,3 +1,4 @@
+import { RawSalesRecord } from '../types/restaurant';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -160,7 +161,8 @@ export function generateMonthlyPnL(
   staffList?: StaffMember[],
   purchasesList?: PurchaseRecord[],
   inventorySnapshots?: InventorySnapshot[],
-  foodCostingBasis: FoodCostingBasis = 'recipe_based'
+  foodCostingBasis: FoodCostingBasis = 'recipe_based',
+  salesRecords: RawSalesRecord[] = []
 ): MonthlyPnLStatement {
   const isWhitefield = outlet === 'whitefield';
   const isBanaswadi = outlet === 'banaswadi';
@@ -175,13 +177,35 @@ export function generateMonthlyPnL(
   let customerDiscounts = 0;
   let returnsAndCancellations = 0;
 
-  // Aggregate from payouts or fallback to verified benchmarks
+  // Platform statements for THIS month (and outlet) only
   const relevantPayouts = payouts.filter((p) => {
+    if (p.month && p.month !== month) return false;
     if (isConsolidated) return true;
     return p.outletId === outlet;
   });
 
-  if (relevantPayouts.length > 0) {
+  // Petpooja POS rows saved for this month (and outlet): the sales source of truth
+  const monthSales = (salesRecords || []).filter((r) => {
+    if (!r.date || String(r.date).slice(0, 7) !== month) return false;
+    if (isConsolidated) return true;
+    return String(r.outlet || '').toLowerCase() === outlet;
+  });
+
+  if (monthSales.length > 0) {
+    monthSales.forEach((r) => {
+      const rev = Number(r.revenue) || 0;
+      const disc = Number(r.discount) || 0;
+      if (r.isReturnOrCancelled) {
+        returnsAndCancellations += Math.abs(rev);
+        return;
+      }
+      // Net-sales rows already exclude discount; gross rows carry it separately
+      grossSales += r.isNetSales ? rev + disc : rev;
+      customerDiscounts += disc;
+      totalOrders += Number(r.quantity) || 0;
+    });
+    totalOrders = Math.round(totalOrders);
+  } else if (relevantPayouts.length > 0) {
     grossSales = relevantPayouts.reduce((sum, p) => sum + p.grossSales, 0);
     customerDiscounts = relevantPayouts.reduce((sum, p) => sum + p.customerDiscounts, 0);
     returnsAndCancellations = relevantPayouts.reduce((sum, p) => sum + p.cancellationCharges, 0);
@@ -287,21 +311,36 @@ export function generateMonthlyPnL(
   let deliveryShareCosts = 0;
   let hyperpureSupplierOffset = 0;
 
-  if (relevantPayouts.length > 0) {
-    platformCommissions = relevantPayouts.reduce((sum, p) => sum + p.commissionAmount, 0);
-    platformTaxesAndFees = relevantPayouts.reduce(
-      (sum, p) => sum + p.gstOnCommission + p.paymentGatewayFee + p.otherPlatformFees + p.advertisingSpend,
-      0
-    );
-    deliveryShareCosts = relevantPayouts.reduce((sum, p) => sum + p.customerDeliveryFeeShare, 0);
-    hyperpureSupplierOffset = relevantPayouts.reduce((sum, p) => sum + p.hyperpureRecovery, 0);
-  } else {
-    // Standard blended 21.5% commission and 5.5% platform fees
-    platformCommissions = Math.round(netSalesRevenue * 0.215);
-    platformTaxesAndFees = Math.round(netSalesRevenue * 0.058);
-    deliveryShareCosts = Math.round(netSalesRevenue * 0.024);
-    hyperpureSupplierOffset = 0;
-  }
+  // Per outlet: actual platform statements when uploaded for this month, otherwise the standard blended
+  // estimate on that outlet's own sales (so one outlet's statement never hides the other outlet's costs).
+  const outletsInScope: string[] = isConsolidated ? ['banaswadi', 'whitefield'] : [outlet];
+  const outletNetSales = (o: string) => {
+    if (monthSales.length === 0) return isConsolidated ? 0 : netSalesRevenue;
+    return monthSales
+      .filter((r) => String(r.outlet || '').toLowerCase() === o && !r.isReturnOrCancelled)
+      .reduce((sum, r) => sum + (Number(r.revenue) || 0) - (r.isNetSales ? 0 : Number(r.discount) || 0), 0);
+  };
+  outletsInScope.forEach((o) => {
+    const ps = relevantPayouts.filter((p) => p.outletId === o);
+    if (ps.length > 0) {
+      platformCommissions += ps.reduce((sum, p) => sum + p.commissionAmount, 0);
+      platformTaxesAndFees += ps.reduce(
+        (sum, p) => sum + p.gstOnCommission + p.paymentGatewayFee + p.otherPlatformFees + p.advertisingSpend,
+        0
+      );
+      deliveryShareCosts += ps.reduce((sum, p) => sum + p.customerDeliveryFeeShare, 0);
+      hyperpureSupplierOffset += ps.reduce((sum, p) => sum + p.hyperpureRecovery, 0);
+    } else {
+      // Standard blended 21.5% commission and 5.8% platform fees
+      const base = isConsolidated && monthSales.length === 0 ? netSalesRevenue / outletsInScope.length : outletNetSales(o);
+      platformCommissions += Math.round(base * 0.215);
+      platformTaxesAndFees += Math.round(base * 0.058);
+      deliveryShareCosts += Math.round(base * 0.024);
+    }
+  });
+  platformCommissions = Math.round(platformCommissions);
+  platformTaxesAndFees = Math.round(platformTaxesAndFees);
+  deliveryShareCosts = Math.round(deliveryShareCosts);
 
   const totalVariableChannelCosts = platformCommissions + platformTaxesAndFees + deliveryShareCosts;
   const platformCommissionPercentage = netSalesRevenue > 0 ? (platformCommissions / netSalesRevenue) * 100 : 0;
