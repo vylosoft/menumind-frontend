@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { payoutsApi } from "../../../lib/ingestionApi";
-import { ApiError } from "../../../lib/apiClient";
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import { payoutsApi } from '../../../lib/ingestionApi';
+import { ApiError } from '../../../lib/apiClient';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   PlatformPayoutRecord,
   HyperpureReconciliationReport,
@@ -13,20 +13,20 @@ import {
   GrowthAnalysisMetrics,
   ChannelAwareBreakEvenMetrics,
   OutletId,
-} from "../../../types/finance";
-import { RawSalesRecord, ParentDish } from "../../../types/restaurant";
-import { PurchaseRecord } from "../../../types/purchases";
-import { CateringOrder } from "../../../types/catering";
-import { StaffMember } from "../../../types/payrollStaff";
-import { OutletOperatingExpenseItem } from "../../../types/operatingCosts";
+} from '../../../types/finance';
+import { RawSalesRecord, ParentDish } from '../../../types/restaurant';
+import { PurchaseRecord } from '../../../types/purchases';
+import { CateringOrder } from '../../../types/catering';
+import { StaffMember } from '../../../types/payrollStaff';
+import { OutletOperatingExpenseItem } from '../../../types/operatingCosts';
 import {
   parseAggregatorPayoutSpreadsheet,
   matchPosWithPayouts,
   reconcileHyperpurePurchases,
   calculateGrowthMetrics,
   calculateChannelAwareBreakEven,
-} from "../../../utils/payoutManager";
-import { formatINR } from "../../../utils/financeCalculations";
+} from '../../../utils/payoutManager';
+import { formatINR } from '../../../utils/financeCalculations';
 import {
   Upload,
   FileSpreadsheet,
@@ -48,7 +48,7 @@ import {
   Building2,
   Calendar,
   Check,
-} from "lucide-react";
+} from 'lucide-react';
 
 interface AggregatorPayoutUploadSectionProps {
   payouts: PlatformPayoutRecord[];
@@ -67,23 +67,15 @@ const GrowthValue: React.FC<{ value: number }> = ({ value }) => {
   if (!value) return <span className="font-semibold text-slate-400">—</span>;
   const up = value > 0;
   return (
-    <span
-      className={`font-bold flex items-center ${up ? "text-emerald-700" : "text-rose-700"}`}
-    >
-      {up ? (
-        <ArrowUpRight className="w-3.5 h-3.5" />
-      ) : (
-        <ArrowDownRight className="w-3.5 h-3.5" />
-      )}
-      {up ? "+" : ""}
+    <span className={`font-bold flex items-center ${up ? 'text-emerald-700' : 'text-rose-700'}`}>
+      {up ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
+      {up ? '+' : ''}
       {value.toFixed(1)}%
     </span>
   );
 };
 
-export const AggregatorPayoutUploadSection: React.FC<
-  AggregatorPayoutUploadSectionProps
-> = ({
+export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSectionProps> = ({
   payouts,
   onUpdatePayouts,
   rawRecords = [],
@@ -96,8 +88,7 @@ export const AggregatorPayoutUploadSection: React.FC<
   onOpenSupabaseModal,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedOutlet, setSelectedOutlet] =
-    useState<OutletId>("consolidated");
+  const [selectedOutlet, setSelectedOutlet] = useState<OutletId>('consolidated');
   // Months that actually have data (statements or POS sales), newest first
   const availableMonths = useMemo(() => {
     const set = new Set<string>();
@@ -105,50 +96,36 @@ export const AggregatorPayoutUploadSection: React.FC<
     rawRecords.forEach((r) => r.date && set.add(r.date.slice(0, 7)));
     if (set.size === 0) {
       const now = new Date();
-      set.add(
-        `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
-      );
+      set.add(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
     }
     return Array.from(set).sort().reverse();
   }, [payouts, rawRecords]);
-  const [selectedMonth, setSelectedMonth] = useState<string>("");
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
   useEffect(() => {
-    if (!selectedMonth || !availableMonths.includes(selectedMonth))
-      setSelectedMonth(availableMonths[0]);
+    if (!selectedMonth || !availableMonths.includes(selectedMonth)) setSelectedMonth(availableMonths[0]);
   }, [availableMonths, selectedMonth]);
-  const monthLabel = (m: string, style: "long" | "short" = "long") => {
-    if (!m) return "";
-    const [y, mo] = m.split("-").map(Number);
-    return new Date(y, mo - 1, 1).toLocaleString(
-      "en-IN",
-      style === "long"
-        ? { month: "long", year: "numeric" }
-        : { month: "short", year: "2-digit" },
-    );
+  const monthLabel = (m: string, style: 'long' | 'short' = 'long') => {
+    if (!m) return '';
+    const [y, mo] = m.split('-').map(Number);
+    return new Date(y, mo - 1, 1).toLocaleString('en-IN', style === 'long' ? { month: 'long', year: 'numeric' } : { month: 'short', year: '2-digit' });
   };
   const shiftMonth = (m: string, delta: number) => {
-    if (!m) return "";
-    const [y, mo] = m.split("-").map(Number);
+    if (!m) return '';
+    const [y, mo] = m.split('-').map(Number);
     const d = new Date(y, mo - 1 + delta, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   };
-  const [selectedPlatform, setSelectedPlatform] = useState<
-    "auto" | "swiggy" | "zomato" | "ownly"
-  >("auto");
-  const [selectedPeriodType, setSelectedPeriodType] = useState<
-    "monthly" | "weekly"
-  >("monthly");
+  const [selectedPlatform, setSelectedPlatform] = useState<'auto' | 'swiggy' | 'zomato' | 'ownly'>('auto');
+  const [selectedPeriodType, setSelectedPeriodType] = useState<'monthly' | 'weekly'>('monthly');
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadSuccessMessage, setUploadSuccessMessage] = useState<
-    string | null
-  >(null);
+  const [uploadSuccessMessage, setUploadSuccessMessage] = useState<string | null>(null);
   const [channelShiftSim, setChannelShiftSim] = useState<number>(15);
 
   // Filter payouts based on selected outlet
   const relevantPayouts = useMemo(() => {
     return payouts.filter((p) => {
-      if (selectedOutlet === "consolidated") return true;
+      if (selectedOutlet === 'consolidated') return true;
       return p.outletId === selectedOutlet;
     });
   }, [payouts, selectedOutlet]);
@@ -156,18 +133,13 @@ export const AggregatorPayoutUploadSection: React.FC<
   // 1. Channel POS Matching Report: computed by the API from stored POS sales + payout statements for the month.
   const localMatchReport: ChannelPosMatchReport = useMemo(() => {
     return matchPosWithPayouts(
-      rawRecords.filter(
-        (r) => !selectedMonth || (r.date || "").startsWith(selectedMonth),
-      ),
-      relevantPayouts.filter(
-        (p) => !selectedMonth || p.month === selectedMonth,
-      ),
-      selectedOutlet,
+      rawRecords.filter((r) => !selectedMonth || (r.date || '').startsWith(selectedMonth)),
+      relevantPayouts.filter((p) => !selectedMonth || p.month === selectedMonth),
+      selectedOutlet
     );
   }, [rawRecords, relevantPayouts, selectedOutlet, selectedMonth]);
-  const [serverMatchReport, setServerMatchReport] =
-    useState<ChannelPosMatchReport | null>(null);
-  const [matchSource, setMatchSource] = useState<string>("");
+  const [serverMatchReport, setServerMatchReport] = useState<ChannelPosMatchReport | null>(null);
+  const [matchSource, setMatchSource] = useState<string>('');
   const [matchRefreshKey, setMatchRefreshKey] = useState(0);
   const [matchLoading, setMatchLoading] = useState(false);
   // Reports already fetched for a month/outlet are reused; cleared whenever statements change.
@@ -184,7 +156,7 @@ export const AggregatorPayoutUploadSection: React.FC<
     const cached = matchCacheRef.current.get(key);
     if (cached) {
       setServerMatchReport(cached);
-      setMatchSource(cached.posSource || "");
+      setMatchSource(cached.posSource || '');
       return;
     }
     setMatchLoading(true);
@@ -194,12 +166,12 @@ export const AggregatorPayoutUploadSection: React.FC<
         matchCacheRef.current.set(key, report);
         if (cancelled) return;
         setServerMatchReport(report);
-        setMatchSource(report.posSource || "");
+        setMatchSource(report.posSource || '');
       })
       .catch(() => {
         if (!cancelled) {
           setServerMatchReport(null);
-          setMatchSource("");
+          setMatchSource('');
         }
       })
       .finally(() => {
@@ -210,110 +182,53 @@ export const AggregatorPayoutUploadSection: React.FC<
     };
   }, [selectedMonth, selectedOutlet, payouts, matchRefreshKey]);
 
-  const channelMatchReport: ChannelPosMatchReport =
-    serverMatchReport || localMatchReport;
+  const channelMatchReport: ChannelPosMatchReport = serverMatchReport || localMatchReport;
 
   // 2. Hyperpure Supplier Offset Audit
   const hyperpureReport: HyperpureReconciliationReport = useMemo(() => {
-    return reconcileHyperpurePurchases(
-      purchases,
-      payouts,
-      selectedOutlet,
-      selectedMonth,
-    );
+    return reconcileHyperpurePurchases(purchases, payouts, selectedOutlet, selectedMonth);
   }, [purchases, payouts, selectedOutlet, selectedMonth]);
 
   // 3. MoM & YoY Growth Analytics
   const growthMetrics: GrowthAnalysisMetrics = useMemo(() => {
-    return calculateGrowthMetrics(
-      selectedMonth,
-      payouts,
-      parentDishes,
-      selectedOutlet,
-    );
-  }, [selectedMonth, payouts, parentDishes, selectedOutlet]);
+    return calculateGrowthMetrics(selectedMonth, payouts, parentDishes, selectedOutlet, rawRecords);
+  }, [selectedMonth, payouts, parentDishes, selectedOutlet, rawRecords]);
 
   // 4. Channel-Aware Break-Even Analytics
   const breakEvenMetrics: ChannelAwareBreakEvenMetrics = useMemo(() => {
     const aggregatorNet = channelMatchReport.channelReports
-      .filter((c) => c.channel !== "direct")
+      .filter((c) => c.channel !== 'direct')
       .reduce((s, c) => s + c.posNetSales, 0);
     const foodCostTotal = purchases
-      .filter(
-        (p) =>
-          p.month === selectedMonth &&
-          (selectedOutlet === "consolidated" || p.outletId === selectedOutlet),
-      )
+      .filter((p) => p.month === selectedMonth && (selectedOutlet === 'consolidated' || p.outletId === selectedOutlet))
       .reduce((s, p) => s + (p.netAmount || p.totalAmount || 0), 0);
-    return calculateChannelAwareBreakEven(
-      staffDirectory,
-      operatingExpenses,
-      payouts,
-      selectedOutlet,
-      {
-        month: selectedMonth,
-        posNetSales: channelMatchReport.totalPosNet,
-        posOrders: channelMatchReport.channelReports.reduce(
-          (s, c) => s + c.posOrders,
-          0,
-        ),
-        posAggregatorNetSales: aggregatorNet,
-        foodCostTotal,
-      },
-    );
-  }, [
-    staffDirectory,
-    operatingExpenses,
-    payouts,
-    selectedOutlet,
-    selectedMonth,
-    channelMatchReport,
-    purchases,
-  ]);
+    return calculateChannelAwareBreakEven(staffDirectory, operatingExpenses, payouts, selectedOutlet, {
+      month: selectedMonth,
+      posNetSales: channelMatchReport.totalPosNet,
+      posOrders: channelMatchReport.channelReports.reduce((s, c) => s + c.posOrders, 0),
+      posAggregatorNetSales: aggregatorNet,
+      foodCostTotal,
+    });
+  }, [staffDirectory, operatingExpenses, payouts, selectedOutlet, selectedMonth, channelMatchReport, purchases]);
 
   // Statement coverage per channel: a channel can only be reconciled against statements that were uploaded.
   const noStatement = (c: { channel: string; payoutGrossSales: number }) =>
-    c.channel !== "direct" && !(c.payoutGrossSales > 0);
-  const partialStatement = (c: {
-    channel: string;
-    payoutGrossSales: number;
-    payoutOrders: number;
-    posOrders: number;
-  }) =>
-    !noStatement(c) &&
-    c.channel !== "direct" &&
-    c.posOrders > 0 &&
-    c.payoutOrders < c.posOrders * 0.9;
-  const coveredRows = channelMatchReport.channelReports.filter(
-    (c) => !noStatement(c),
-  );
+    c.channel !== 'direct' && !(c.payoutGrossSales > 0);
+  const partialStatement = (c: { channel: string; payoutGrossSales: number; payoutOrders: number; posOrders: number }) =>
+    !noStatement(c) && c.channel !== 'direct' && c.posOrders > 0 && c.payoutOrders < c.posOrders * 0.9;
+  const coveredRows = channelMatchReport.channelReports.filter((c) => !noStatement(c));
   const coveredVariance = coveredRows.reduce((s, c) => s + c.varianceGross, 0);
-  const rowsNetCredited = channelMatchReport.channelReports.reduce(
-    (s, c) => s + c.payoutNetCredited,
-    0,
-  );
-  const anyIncomplete = channelMatchReport.channelReports.some(
-    (c) => noStatement(c) || partialStatement(c),
-  );
+  const rowsNetCredited = channelMatchReport.channelReports.reduce((s, c) => s + c.payoutNetCredited, 0);
+  const anyIncomplete = channelMatchReport.channelReports.some((c) => noStatement(c) || partialStatement(c));
 
   // Headline Calculations
   const totalDirectSales = useMemo(() => {
-    const directChannel = channelMatchReport.channelReports.find(
-      (c) => c.channel === "direct",
-    );
+    const directChannel = channelMatchReport.channelReports.find((c) => c.channel === 'direct');
     const directPos = directChannel ? directChannel.posNetSales : 0;
     const cateringTotal = cateringOrders
-      .filter(
-        (o) =>
-          selectedOutlet === "consolidated" || o.outletId === selectedOutlet,
-      )
-      .filter(
-        (o) => !selectedMonth || (o.eventDate || "").startsWith(selectedMonth),
-      )
-      .reduce(
-        (s, o) => s + (o.agreedOrderValue || o.netRecognizedValue || 0),
-        0,
-      );
+      .filter((o) => selectedOutlet === 'consolidated' || o.outletId === selectedOutlet)
+      .filter((o) => !selectedMonth || (o.eventDate || '').startsWith(selectedMonth))
+      .reduce((s, o) => s + (o.agreedOrderValue || o.netRecognizedValue || 0), 0);
     return directPos + cateringTotal;
   }, [channelMatchReport, cateringOrders, selectedOutlet, selectedMonth]);
 
@@ -322,14 +237,11 @@ export const AggregatorPayoutUploadSection: React.FC<
   }, [channelMatchReport, totalDirectSales]);
 
   // Handle File Upload: the API parses the statement, stores it and returns the saved payout statements.
-  const uploadPayoutFile = async (
-    file: File,
-    overrides: { month?: string; replace?: boolean } = {},
-  ) => {
+  const uploadPayoutFile = async (file: File, overrides: { month?: string; replace?: boolean } = {}) => {
     const result = await payoutsApi.upload({
       files: [file],
-      platform: selectedPlatform !== "auto" ? selectedPlatform : undefined,
-      outletId: selectedOutlet !== "consolidated" ? selectedOutlet : undefined,
+      platform: selectedPlatform !== 'auto' ? selectedPlatform : undefined,
+      outletId: selectedOutlet !== 'consolidated' ? selectedOutlet : undefined,
       periodType: selectedPeriodType,
       month: overrides.month,
       replace: overrides.replace,
@@ -343,15 +255,13 @@ export const AggregatorPayoutUploadSection: React.FC<
     const warnings = result.files.flatMap((f) => f.warnings);
     setUploadSuccessMessage(
       `Saved ${result.summary.recordCount} ${fileInfo.platform.toUpperCase()} payout statement(s) from "${file.name}" ` +
-        `(${fileInfo.insertedRows} row(s)). Gross ₹${result.summary.totalGrossSales.toLocaleString("en-IN")}, ` +
-        `net ₹${result.summary.totalNetPayout.toLocaleString("en-IN")}.` +
-        (warnings.length ? ` Note: ${warnings.join(" ")}` : ""),
+        `(${fileInfo.insertedRows} row(s)). Gross ₹${result.summary.totalGrossSales.toLocaleString('en-IN')}, ` +
+        `net ₹${result.summary.totalNetPayout.toLocaleString('en-IN')}.` +
+        (warnings.length ? ` Note: ${warnings.join(' ')}` : '')
     );
   };
 
-  const handleFileUpload = async (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -366,26 +276,13 @@ export const AggregatorPayoutUploadSection: React.FC<
           await uploadPayoutFile(file, overrides);
           break;
         } catch (err: any) {
-          if (
-            err instanceof ApiError &&
-            err.status === 409 &&
-            !overrides.replace &&
-            window.confirm(
-              `${err.message}\n\nOK = replace the stored statement with "${file.name}".\nCancel = keep the stored data and add nothing.`,
-            )
-          ) {
+          if (err instanceof ApiError && err.status === 409 && !overrides.replace &&
+              window.confirm(`${err.message}\n\nOK = replace the stored statement with "${file.name}".\nCancel = keep the stored data and add nothing.`)) {
             overrides.replace = true;
             continue;
           }
-          if (
-            err instanceof ApiError &&
-            err.status === 422 &&
-            /month could not be determined/i.test(err.message) &&
-            !overrides.month &&
-            window.confirm(
-              `The statement month could not be detected from "${file.name}". Use ${selectedMonth}?`,
-            )
-          ) {
+          if (err instanceof ApiError && err.status === 422 && /month could not be determined/i.test(err.message) && !overrides.month &&
+              window.confirm(`The statement month could not be detected from "${file.name}". Use ${selectedMonth}?`)) {
             overrides.month = selectedMonth;
             continue;
           }
@@ -393,19 +290,17 @@ export const AggregatorPayoutUploadSection: React.FC<
         }
       }
     } catch (err: any) {
-      setUploadError(err?.message || "Failed to upload the payout file.");
+      setUploadError(err?.message || 'Failed to upload the payout file.');
     } finally {
       setUploadLoading(false);
       if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+        fileInputRef.current.value = '';
       }
     }
   };
 
   const handleDeletePayout = async (id: string) => {
-    const target = payouts.find((p) => p.id === id) as
-      | PlatformPayoutRecord
-      | undefined;
+    const target = payouts.find((p) => p.id === id) as PlatformPayoutRecord | undefined;
     if (!target) return;
 
     if (!target.batchId) {
@@ -417,7 +312,7 @@ export const AggregatorPayoutUploadSection: React.FC<
     const msg =
       siblings.length > 1
         ? `Delete "${target.sourceFileName}" and its ${siblings.length} payout statements from the database?`
-        : `Delete "${target.sourceFileName || "this payout"}" from the database?`;
+        : `Delete "${target.sourceFileName || 'this payout'}" from the database?`;
     if (!window.confirm(msg)) return;
 
     try {
@@ -425,7 +320,7 @@ export const AggregatorPayoutUploadSection: React.FC<
       onUpdatePayouts(await payoutsApi.fetchAll());
       setUploadSuccessMessage(`Deleted "${target.sourceFileName}".`);
     } catch (err: any) {
-      setUploadError(err?.message || "Failed to delete payout statement.");
+      setUploadError(err?.message || 'Failed to delete payout statement.');
     }
   };
 
@@ -434,27 +329,21 @@ export const AggregatorPayoutUploadSection: React.FC<
       {/* Filters & Outlet Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4.5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-            Outlet Scope:
-          </span>
+          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Outlet Scope:</span>
           <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
-            {(["consolidated", "banaswadi", "whitefield"] as OutletId[]).map(
-              (loc) => (
-                <button
-                  key={loc}
-                  onClick={() => setSelectedOutlet(loc)}
-                  className={`px-3 py-1.5 rounded-lg capitalize transition-all cursor-pointer ${
-                    selectedOutlet === loc
-                      ? "bg-white text-slate-900 shadow-xs font-bold"
-                      : "text-slate-500 hover:text-slate-900"
-                  }`}
-                >
-                  {loc === "consolidated"
-                    ? "Consolidated (All Outlets)"
-                    : `${loc} Outlet`}
-                </button>
-              ),
-            )}
+            {(['consolidated', 'banaswadi', 'whitefield'] as OutletId[]).map((loc) => (
+              <button
+                key={loc}
+                onClick={() => setSelectedOutlet(loc)}
+                className={`px-3 py-1.5 rounded-lg capitalize transition-all cursor-pointer ${
+                  selectedOutlet === loc
+                    ? 'bg-white text-slate-900 shadow-xs font-bold'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                {loc === 'consolidated' ? 'Consolidated (All Outlets)' : `${loc} Outlet`}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -473,9 +362,7 @@ export const AggregatorPayoutUploadSection: React.FC<
                 </option>
               ))}
             </select>
-            {matchLoading && (
-              <RefreshCw className="w-3.5 h-3.5 text-teal-600 animate-spin" />
-            )}
+            {matchLoading && <RefreshCw className="w-3.5 h-3.5 text-teal-600 animate-spin" />}
           </div>
 
           {onOpenSupabaseModal && (
@@ -501,21 +388,21 @@ export const AggregatorPayoutUploadSection: React.FC<
                 Statements Incomplete
               </span>
             ) : (
-              <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  channelMatchReport.overallStatus === "matched"
-                    ? "bg-emerald-100 text-emerald-800"
-                    : channelMatchReport.overallStatus === "minor_variance"
-                      ? "bg-amber-100 text-amber-800"
-                      : "bg-rose-100 text-rose-800"
-                }`}
-              >
-                {channelMatchReport.overallStatus === "matched"
-                  ? "Reconciled"
-                  : channelMatchReport.overallStatus === "minor_variance"
-                    ? "Minor Variance"
-                    : "Review Discrepancy"}
-              </span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                channelMatchReport.overallStatus === 'matched'
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : channelMatchReport.overallStatus === 'minor_variance'
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-rose-100 text-rose-800'
+              }`}
+            >
+              {channelMatchReport.overallStatus === 'matched'
+                ? 'Reconciled'
+                : channelMatchReport.overallStatus === 'minor_variance'
+                ? 'Minor Variance'
+                : 'Review Discrepancy'}
+            </span>
             )}
           </div>
           <div className="mt-2 text-2xl font-black text-slate-900 tracking-tight">
@@ -523,18 +410,16 @@ export const AggregatorPayoutUploadSection: React.FC<
           </div>
           <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
             <span>
-              POS Gross:{" "}
+              POS Gross:{' '}
               {formatINR(
                 (channelMatchReport as any).aggregatorPosGross ??
                   channelMatchReport.channelReports
-                    .filter((c) => c.channel !== "direct")
-                    .reduce((s, c) => s + c.posGrossSales, 0),
+                    .filter((c) => c.channel !== 'direct')
+                    .reduce((s, c) => s + c.posGrossSales, 0)
               )}
             </span>
             <span className="font-semibold text-slate-700">
-              {anyIncomplete
-                ? `Covered diff: ${formatINR(Math.abs(coveredVariance))}`
-                : `Diff: ${formatINR(Math.abs(channelMatchReport.overallVariance))}`}
+              {anyIncomplete ? `Covered diff: ${formatINR(Math.abs(coveredVariance))}` : `Diff: ${formatINR(Math.abs(channelMatchReport.overallVariance))}`}
             </span>
           </div>
         </div>
@@ -545,27 +430,25 @@ export const AggregatorPayoutUploadSection: React.FC<
             <span>Hyperpure Offset Audit</span>
             <span
               className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                hyperpureReport.status === "matched"
-                  ? "bg-teal-100 text-teal-800"
-                  : hyperpureReport.status === "pending_deduction"
-                    ? "bg-blue-100 text-blue-800"
-                    : "bg-rose-100 text-rose-800"
+                hyperpureReport.status === 'matched'
+                  ? 'bg-teal-100 text-teal-800'
+                  : hyperpureReport.status === 'pending_deduction'
+                  ? 'bg-blue-100 text-blue-800'
+                  : 'bg-rose-100 text-rose-800'
               }`}
             >
-              {hyperpureReport.status === "matched"
-                ? "100% Cleared"
-                : hyperpureReport.status === "pending_deduction"
-                  ? "Pending Offset"
-                  : "Over Deducted"}
+              {hyperpureReport.status === 'matched'
+                ? '100% Cleared'
+                : hyperpureReport.status === 'pending_deduction'
+                ? 'Pending Offset'
+                : 'Over Deducted'}
             </span>
           </div>
           <div className="mt-2 text-2xl font-black text-teal-700 tracking-tight">
             {formatINR(hyperpureReport.totalDeductedAtPayout)}
           </div>
           <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
-            <span>
-              Invoices Entered: {formatINR(hyperpureReport.totalInvoicedAmount)}
-            </span>
+            <span>Invoices Entered: {formatINR(hyperpureReport.totalInvoicedAmount)}</span>
             <span className="font-semibold text-slate-700">
               {hyperpureReport.totalInvoicesCount} bills
             </span>
@@ -584,9 +467,7 @@ export const AggregatorPayoutUploadSection: React.FC<
             {formatINR(netRealizedBankInflow)}
           </div>
           <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
-            <span>
-              Payouts: {formatINR(channelMatchReport.totalPayoutNetCredited)}
-            </span>
+            <span>Payouts: {formatINR(channelMatchReport.totalPayoutNetCredited)}</span>
             <span>Direct: {formatINR(totalDirectSales)}</span>
           </div>
         </div>
@@ -605,9 +486,7 @@ export const AggregatorPayoutUploadSection: React.FC<
           <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
             <span>Break-Even Run Rate:</span>
             <span className="font-semibold text-slate-700">
-              {breakEvenMetrics.breakEvenOrders > 0
-                ? `${breakEvenMetrics.breakEvenOrders} orders/mo`
-                : "—"}
+              {breakEvenMetrics.breakEvenOrders > 0 ? `${breakEvenMetrics.breakEvenOrders} orders/mo` : '—'}
             </span>
           </div>
         </div>
@@ -625,37 +504,29 @@ export const AggregatorPayoutUploadSection: React.FC<
               Upload Swiggy, Zomato, or Ownly Payout Statements
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Upload weekly or monthly settlement sheets (`.xlsx`, `.xls`,
-              `.csv`). The engine extracts gross orders, commissions, GST,
-              TCS/TDS, and separates Hyperpure ingredient offsets to reconcile
-              directly against Petpooja POS revenue.
+              Upload weekly or monthly settlement sheets (`.xlsx`, `.xls`, `.csv`). The engine extracts gross orders,
+              commissions, GST, TCS/TDS, and separates Hyperpure ingredient offsets to reconcile directly against Petpooja POS revenue.
             </p>
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[11px] font-semibold text-slate-300">
-                Period Frequency:
-              </label>
+              <label className="text-[11px] font-semibold text-slate-300">Period Frequency:</label>
               <div className="flex bg-slate-800/80 p-1 rounded-xl border border-slate-700 text-xs">
                 <button
                   type="button"
-                  onClick={() => setSelectedPeriodType("monthly")}
+                  onClick={() => setSelectedPeriodType('monthly')}
                   className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                    selectedPeriodType === "monthly"
-                      ? "bg-indigo-600 text-white"
-                      : "text-slate-400 hover:text-white"
+                    selectedPeriodType === 'monthly' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   Monthly Payout
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSelectedPeriodType("weekly")}
+                  onClick={() => setSelectedPeriodType('weekly')}
                   className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                    selectedPeriodType === "weekly"
-                      ? "bg-indigo-600 text-white"
-                      : "text-slate-400 hover:text-white"
+                    selectedPeriodType === 'weekly' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   Weekly Payout
@@ -718,8 +589,7 @@ export const AggregatorPayoutUploadSection: React.FC<
               Petpooja POS vs Aggregator Payout Reconciliation Matrix
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Side-by-side comparison of Gross Orders recorded at the counter vs
-              Net Settlement Credited to the Bank Account.
+              Side-by-side comparison of Gross Orders recorded at the counter vs Net Settlement Credited to the Bank Account.
             </p>
           </div>
           <span className="text-[11px] font-semibold text-slate-500">
@@ -743,20 +613,17 @@ export const AggregatorPayoutUploadSection: React.FC<
             </thead>
             <tbody className="divide-y divide-slate-100">
               {channelMatchReport.channelReports.map((c) => (
-                <tr
-                  key={c.channel}
-                  className="hover:bg-slate-50/70 transition-colors"
-                >
+                <tr key={c.channel} className="hover:bg-slate-50/70 transition-colors">
                   <td className="py-3.5 px-4 font-bold text-slate-900 flex items-center gap-2">
                     <span
                       className={`w-2.5 h-2.5 rounded-full ${
-                        c.channel === "swiggy"
-                          ? "bg-amber-500"
-                          : c.channel === "zomato"
-                            ? "bg-rose-500"
-                            : c.channel === "ownly"
-                              ? "bg-indigo-500"
-                              : "bg-emerald-500"
+                        c.channel === 'swiggy'
+                          ? 'bg-amber-500'
+                          : c.channel === 'zomato'
+                          ? 'bg-rose-500'
+                          : c.channel === 'ownly'
+                          ? 'bg-indigo-500'
+                          : 'bg-emerald-500'
                       }`}
                     />
                     {c.channelLabel}
@@ -768,11 +635,11 @@ export const AggregatorPayoutUploadSection: React.FC<
                     {c.posOrders.toLocaleString()}
                   </td>
                   <td className="py-3.5 px-3 text-right font-mono font-semibold text-slate-900">
-                    {c.channel === "direct"
+                    {c.channel === 'direct'
                       ? `${formatINR(c.payoutGrossSales)} (POS)`
                       : c.payoutGrossSales > 0
-                        ? formatINR(c.payoutGrossSales)
-                        : "No statement"}
+                      ? formatINR(c.payoutGrossSales)
+                      : 'No statement'}
                   </td>
                   <td className="py-3.5 px-3 text-right text-slate-600">
                     {c.payoutOrders.toLocaleString()}
@@ -784,53 +651,45 @@ export const AggregatorPayoutUploadSection: React.FC<
                     {noStatement(c) ? (
                       <span className="text-slate-400">—</span>
                     ) : (
-                      <span
-                        className={
-                          Math.abs(c.varianceGross) <= 500
-                            ? "text-emerald-700"
-                            : Math.abs(c.varianceGross) <= 5000
-                              ? "text-amber-700"
-                              : "text-rose-700"
-                        }
-                      >
-                        {c.varianceGross >= 0 ? "+" : ""}
-                        {formatINR(c.varianceGross)}
-                      </span>
+                    <span
+                      className={
+                        Math.abs(c.varianceGross) <= 500
+                          ? 'text-emerald-700'
+                          : Math.abs(c.varianceGross) <= 5000
+                          ? 'text-amber-700'
+                          : 'text-rose-700'
+                      }
+                    >
+                      {c.varianceGross >= 0 ? '+' : ''}
+                      {formatINR(c.varianceGross)}
+                    </span>
                     )}
                   </td>
                   <td className="py-3.5 px-4 text-center">
                     {noStatement(c) ? (
-                      <span
-                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600"
-                        title="Upload this month's settlement statement to reconcile"
-                      >
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600" title="Upload this month's settlement statement to reconcile">
                         Statement Not Uploaded
                       </span>
                     ) : partialStatement(c) ? (
-                      <span
-                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800"
-                        title={`Statements cover ${c.payoutOrders} of ${c.posOrders} POS orders. Upload the missing brands / outlets / weeks.`}
-                      >
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title={`Statements cover ${c.payoutOrders} of ${c.posOrders} POS orders. Upload the missing brands / outlets / weeks.`}>
                         Partial: {c.payoutOrders}/{c.posOrders} orders
                       </span>
                     ) : (
                       <span
                         className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                          c.matchStatus === "matched"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : c.matchStatus === "minor_variance"
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-rose-100 text-rose-800"
+                          c.matchStatus === 'matched'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : c.matchStatus === 'minor_variance'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-rose-100 text-rose-800'
                         }`}
                       >
-                        {c.matchStatus === "matched" && (
-                          <Check className="w-3 h-3" />
-                        )}
-                        {c.matchStatus === "matched"
-                          ? "100% Matched"
-                          : c.matchStatus === "minor_variance"
-                            ? "Minor Variance"
-                            : "Review Discrepancy"}
+                        {c.matchStatus === 'matched' && <Check className="w-3 h-3" />}
+                        {c.matchStatus === 'matched'
+                          ? '100% Matched'
+                          : c.matchStatus === 'minor_variance'
+                          ? 'Minor Variance'
+                          : 'Review Discrepancy'}
                       </span>
                     )}
                   </td>
@@ -844,31 +703,19 @@ export const AggregatorPayoutUploadSection: React.FC<
                   {formatINR(channelMatchReport.totalPosGross)}
                 </td>
                 <td className="py-3 px-3 text-right">
-                  {channelMatchReport.channelReports
-                    .reduce((s, c) => s + c.posOrders, 0)
-                    .toLocaleString()}
+                  {channelMatchReport.channelReports.reduce((s, c) => s + c.posOrders, 0).toLocaleString()}
                 </td>
                 <td className="py-3 px-3 text-right font-mono">
-                  {formatINR(
-                    channelMatchReport.channelReports.reduce(
-                      (s, c) => s + c.payoutGrossSales,
-                      0,
-                    ),
-                  )}
+                  {formatINR(channelMatchReport.channelReports.reduce((s, c) => s + c.payoutGrossSales, 0))}
                 </td>
                 <td className="py-3 px-3 text-right">
-                  {channelMatchReport.channelReports
-                    .reduce((s, c) => s + c.payoutOrders, 0)
-                    .toLocaleString()}
+                  {channelMatchReport.channelReports.reduce((s, c) => s + c.payoutOrders, 0).toLocaleString()}
                 </td>
                 <td className="py-3 px-3 text-right font-mono text-emerald-700">
                   {formatINR(rowsNetCredited)}
                 </td>
-                <td
-                  className="py-3 px-3 text-right font-mono"
-                  title="Variance of channels that have a statement"
-                >
-                  {coveredVariance >= 0 ? "+" : ""}
+                <td className="py-3 px-3 text-right font-mono" title="Variance of channels that have a statement">
+                  {coveredVariance >= 0 ? '+' : ''}
                   {formatINR(coveredVariance)}
                 </td>
                 <td className="py-3 px-4 text-center">
@@ -877,22 +724,21 @@ export const AggregatorPayoutUploadSection: React.FC<
                       Statements Incomplete
                     </span>
                   ) : (
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        channelMatchReport.overallStatus === "matched"
-                          ? "bg-emerald-100 text-emerald-800"
-                          : channelMatchReport.overallStatus ===
-                              "minor_variance"
-                            ? "bg-amber-100 text-amber-800"
-                            : "bg-rose-100 text-rose-800"
-                      }`}
-                    >
-                      {channelMatchReport.overallStatus === "matched"
-                        ? "100% Matched"
-                        : channelMatchReport.overallStatus === "minor_variance"
-                          ? "Minor Variance"
-                          : "Review Discrepancy"}
-                    </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      channelMatchReport.overallStatus === 'matched'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : channelMatchReport.overallStatus === 'minor_variance'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-rose-100 text-rose-800'
+                    }`}
+                  >
+                    {channelMatchReport.overallStatus === 'matched'
+                      ? '100% Matched'
+                      : channelMatchReport.overallStatus === 'minor_variance'
+                      ? 'Minor Variance'
+                      : 'Review Discrepancy'}
+                  </span>
                   )}
                 </td>
               </tr>
@@ -912,64 +758,42 @@ export const AggregatorPayoutUploadSection: React.FC<
             </h3>
             <span
               className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                hyperpureReport.status === "matched"
-                  ? "bg-teal-100 text-teal-800"
-                  : "bg-amber-100 text-amber-800"
+                hyperpureReport.status === 'matched'
+                  ? 'bg-teal-100 text-teal-800'
+                  : 'bg-amber-100 text-amber-800'
               }`}
             >
-              {hyperpureReport.status === "matched"
-                ? "Offset Reconciled"
-                : "Variance Detected"}
+              {hyperpureReport.status === 'matched' ? 'Offset Reconciled' : 'Variance Detected'}
             </span>
           </div>
 
           <div className="bg-teal-50/70 border border-teal-200 rounded-xl p-3.5 text-xs text-teal-900 leading-relaxed">
-            <strong>Accounting Protection:</strong> Hyperpure deductions on
-            Zomato settlements clear unpaid grocery liabilities. They are offset
-            against Purchase &amp; COGS invoices so they are{" "}
-            <strong>never double-counted</strong> in operating expenses.
+            <strong>Accounting Protection:</strong> Hyperpure deductions on Zomato settlements clear unpaid grocery liabilities.
+            They are offset against Purchase &amp; COGS invoices so they are <strong>never double-counted</strong> in operating expenses.
           </div>
 
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-              <div className="text-[10px] text-slate-500 font-medium">
-                Entered Invoices
-              </div>
-              <div className="font-bold text-slate-900 mt-0.5">
-                {formatINR(hyperpureReport.totalInvoicedAmount)}
-              </div>
-              <div className="text-[10px] text-slate-400">
-                {hyperpureReport.totalInvoicesCount} invoices
-              </div>
+              <div className="text-[10px] text-slate-500 font-medium">Entered Invoices</div>
+              <div className="font-bold text-slate-900 mt-0.5">{formatINR(hyperpureReport.totalInvoicedAmount)}</div>
+              <div className="text-[10px] text-slate-400">{hyperpureReport.totalInvoicesCount} invoices</div>
             </div>
             <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-              <div className="text-[10px] text-slate-500 font-medium">
-                Settlement Offset
-              </div>
-              <div className="font-bold text-teal-700 mt-0.5">
-                {formatINR(hyperpureReport.totalDeductedAtPayout)}
-              </div>
-              <div className="text-[10px] text-teal-600 font-medium">
-                Deducted in Payout
-              </div>
+              <div className="text-[10px] text-slate-500 font-medium">Settlement Offset</div>
+              <div className="font-bold text-teal-700 mt-0.5">{formatINR(hyperpureReport.totalDeductedAtPayout)}</div>
+              <div className="text-[10px] text-teal-600 font-medium">Deducted in Payout</div>
             </div>
             <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-              <div className="text-[10px] text-slate-500 font-medium">
-                Variance
-              </div>
+              <div className="text-[10px] text-slate-500 font-medium">Variance</div>
               <div
                 className={`font-bold mt-0.5 ${
-                  Math.abs(hyperpureReport.variance) <= 100
-                    ? "text-emerald-700"
-                    : "text-amber-700"
+                  Math.abs(hyperpureReport.variance) <= 100 ? 'text-emerald-700' : 'text-amber-700'
                 }`}
               >
                 {formatINR(hyperpureReport.variance)}
               </div>
               <div className="text-[10px] text-slate-400">
-                {Math.abs(hyperpureReport.variance) <= 100
-                  ? "Clean match"
-                  : "Action needed"}
+                {Math.abs(hyperpureReport.variance) <= 100 ? 'Clean match' : 'Action needed'}
               </div>
             </div>
           </div>
@@ -981,28 +805,17 @@ export const AggregatorPayoutUploadSection: React.FC<
             </div>
             <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-100 text-xs">
               {hyperpureReport.matchedBills.map((b) => (
-                <div
-                  key={b.invoiceNumber}
-                  className="pt-1.5 flex items-center justify-between text-slate-700"
-                >
+                <div key={b.invoiceNumber} className="pt-1.5 flex items-center justify-between text-slate-700">
                   <div>
-                    <span className="font-semibold text-slate-900">
-                      {b.invoiceNumber}
-                    </span>
-                    <span className="text-[10px] text-slate-400 block">
-                      {b.description} ({b.date})
-                    </span>
+                    <span className="font-semibold text-slate-900">{b.invoiceNumber}</span>
+                    <span className="text-[10px] text-slate-400 block">{b.description} ({b.date})</span>
                   </div>
-                  <span className="font-mono font-bold text-slate-800">
-                    {formatINR(b.amount)}
-                  </span>
+                  <span className="font-mono font-bold text-slate-800">{formatINR(b.amount)}</span>
                 </div>
               ))}
               {hyperpureReport.matchedBills.length === 0 && (
                 <div className="text-slate-400 text-xs py-2 text-center">
-                  No Hyperpure supplier bills found in Purchase &amp; COGS.
-                  Enter them under Purchase &amp; COGS to enable automatic
-                  offset matching.
+                  No Hyperpure supplier bills found in Purchase &amp; COGS. Enter them under Purchase &amp; COGS to enable automatic offset matching.
                 </div>
               )}
             </div>
@@ -1019,17 +832,17 @@ export const AggregatorPayoutUploadSection: React.FC<
             <span
               className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                 growthMetrics.momRevenueGrowthPct > 0
-                  ? "bg-emerald-100 text-emerald-800"
+                  ? 'bg-emerald-100 text-emerald-800'
                   : growthMetrics.momRevenueGrowthPct < 0
-                    ? "bg-rose-100 text-rose-800"
-                    : "bg-slate-100 text-slate-600"
+                  ? 'bg-rose-100 text-rose-800'
+                  : 'bg-slate-100 text-slate-600'
               }`}
             >
               {growthMetrics.momRevenueGrowthPct > 0
-                ? "Expansion"
+                ? 'Expansion'
                 : growthMetrics.momRevenueGrowthPct < 0
-                  ? "Contraction"
-                  : "Needs previous month data"}
+                ? 'Contraction'
+                : 'Needs previous month data'}
             </span>
           </div>
 
@@ -1039,8 +852,7 @@ export const AggregatorPayoutUploadSection: React.FC<
               <div className="flex items-center justify-between font-bold text-emerald-950">
                 <span>Month-on-Month (MoM)</span>
                 <span className="text-[10px] text-emerald-700">
-                  {monthLabel(selectedMonth, "short")} vs{" "}
-                  {monthLabel(shiftMonth(selectedMonth, -1), "short")}
+                  {monthLabel(selectedMonth, 'short')} vs {monthLabel(shiftMonth(selectedMonth, -1), 'short')}
                 </span>
               </div>
               <div className="space-y-1 pt-1">
@@ -1068,8 +880,7 @@ export const AggregatorPayoutUploadSection: React.FC<
               <div className="flex items-center justify-between font-bold text-indigo-950">
                 <span>Year-on-Year (YoY)</span>
                 <span className="text-[10px] text-indigo-700">
-                  {monthLabel(selectedMonth, "short")} vs{" "}
-                  {monthLabel(shiftMonth(selectedMonth, -12), "short")}
+                  {monthLabel(selectedMonth, 'short')} vs {monthLabel(shiftMonth(selectedMonth, -12), 'short')}
                 </span>
               </div>
               <div className="space-y-1 pt-1">
@@ -1096,8 +907,7 @@ export const AggregatorPayoutUploadSection: React.FC<
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
             <span>Direct Realization Ratio:</span>
             <span className="font-mono font-bold text-emerald-700">
-              {growthMetrics.directRealizationRatioPct.toFixed(1)}% of every
-              gross ₹100 reaches bank
+              {growthMetrics.directRealizationRatioPct.toFixed(1)}% of every gross ₹100 reaches bank
             </span>
           </div>
         </div>
@@ -1112,17 +922,13 @@ export const AggregatorPayoutUploadSection: React.FC<
               Break-Even Intelligence &amp; Aggregator Take-Rate Impact
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Quantifies how aggregator commissions (
-              {(breakEvenMetrics.aggregatorTakeRatePct || 0).toFixed(1)}%
-              effective take-rate from your statements) increase your required
-              break-even revenue, and models the profit impact of shifting
-              orders to direct channels.
+              Quantifies how aggregator commissions ({(breakEvenMetrics.aggregatorTakeRatePct || 0).toFixed(1)}% effective take-rate from your statements) increase your required break-even revenue, and models the profit impact of shifting orders to direct channels.
             </p>
           </div>
 
           {onNavigateTab && (
             <button
-              onClick={() => onNavigateTab("break-even")}
+              onClick={() => onNavigateTab('break-even')}
               className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1 cursor-pointer"
             >
               <span>View Full Break-Even Section</span>
@@ -1133,46 +939,34 @@ export const AggregatorPayoutUploadSection: React.FC<
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
-            <span className="text-slate-500 font-medium">
-              Monthly Fixed Obligations
-            </span>
+            <span className="text-slate-500 font-medium">Monthly Fixed Obligations</span>
             <div className="text-xl font-black text-slate-900">
               {formatINR(breakEvenMetrics.totalFixedObligations)}
             </div>
-            <span className="text-[11px] text-slate-400">
-              Rent, staff payroll &amp; commercial utilities
-            </span>
+            <span className="text-[11px] text-slate-400">Rent, staff payroll &amp; commercial utilities</span>
           </div>
 
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
-            <span className="text-slate-500 font-medium">
-              Break-Even Run Rate
-            </span>
+            <span className="text-slate-500 font-medium">Break-Even Run Rate</span>
             <div className="text-xl font-black text-indigo-700">
-              {breakEvenMetrics.breakEvenGrossRevenue > 0
-                ? formatINR(breakEvenMetrics.breakEvenGrossRevenue)
-                : "—"}
+              {breakEvenMetrics.breakEvenGrossRevenue > 0 ? formatINR(breakEvenMetrics.breakEvenGrossRevenue) : '—'}
             </div>
             <span className="text-[11px] text-slate-400">
               {breakEvenMetrics.breakEvenGrossRevenue > 0
                 ? `Requires ${breakEvenMetrics.breakEvenOrders} orders / month`
                 : breakEvenMetrics.totalFixedObligations <= 0
-                  ? "Add staff wages & operating expenses"
-                  : "Add this month’s purchases (food cost) to calculate"}
+                ? 'Add staff wages & operating expenses'
+                : 'Add this month’s purchases (food cost) to calculate'}
             </span>
           </div>
 
           <div className="p-4 bg-rose-50/70 rounded-xl border border-rose-200 text-xs space-y-1">
-            <span className="text-rose-700 font-medium">
-              Aggregator Commission Haircut
-            </span>
+            <span className="text-rose-700 font-medium">Aggregator Commission Haircut</span>
             <div className="text-xl font-black text-rose-700">
               {formatINR(breakEvenMetrics.aggregatorCommissionDrain)}
             </div>
             <span className="text-[11px] text-rose-600">
-              Platform take-rate{" "}
-              {(breakEvenMetrics.aggregatorTakeRatePct || 0).toFixed(1)}% in{" "}
-              {monthLabel(selectedMonth)}
+              Platform take-rate {(breakEvenMetrics.aggregatorTakeRatePct || 0).toFixed(1)}% in {monthLabel(selectedMonth)}
             </span>
           </div>
         </div>
@@ -1183,12 +977,10 @@ export const AggregatorPayoutUploadSection: React.FC<
             <div>
               <h4 className="text-sm font-bold text-emerald-950 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-emerald-600" />
-                Channel Shift What-If Simulator (+{channelShiftSim}% Shift to
-                Direct)
+                Channel Shift What-If Simulator (+{channelShiftSim}% Shift to Direct)
               </h4>
               <p className="text-xs text-emerald-800 mt-0.5">
-                Shift customer orders from Swiggy/Zomato to direct QR takeaway
-                or Ownly at 0–5% commission.
+                Shift customer orders from Swiggy/Zomato to direct QR takeaway or Ownly at 0–5% commission.
               </p>
             </div>
 
@@ -1210,69 +1002,43 @@ export const AggregatorPayoutUploadSection: React.FC<
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-1">
             <div className="bg-white/80 p-3 rounded-xl border border-emerald-200">
-              <div className="text-[10px] text-slate-500 font-medium">
-                Monthly Cash Savings
-              </div>
+              <div className="text-[10px] text-slate-500 font-medium">Monthly Cash Savings</div>
               <div className="text-base font-bold text-emerald-700 mt-0.5">
-                +
-                {formatINR(
-                  Math.round(
-                    (breakEvenMetrics.channelShiftSimulation.monthlySavingsINR *
-                      channelShiftSim) /
-                      15,
-                  ),
-                )}{" "}
-                / mo
+                +{formatINR(Math.round((breakEvenMetrics.channelShiftSimulation.monthlySavingsINR * channelShiftSim) / 15))} / mo
               </div>
-              <div className="text-[10px] text-emerald-600 font-medium">
-                Retained in restaurant bank
-              </div>
+              <div className="text-[10px] text-emerald-600 font-medium">Retained in restaurant bank</div>
             </div>
 
             <div className="bg-white/80 p-3 rounded-xl border border-emerald-200">
-              <div className="text-[10px] text-slate-500 font-medium">
-                Lower Break-Even Volume
-              </div>
+              <div className="text-[10px] text-slate-500 font-medium">Lower Break-Even Volume</div>
               <div className="text-base font-bold text-indigo-700 mt-0.5">
                 {breakEvenMetrics.breakEvenOrders > 0
                   ? `-${Math.round((breakEvenMetrics.channelShiftSimulation.reducedBreakEvenOrders * channelShiftSim) / 15)} orders`
-                  : "—"}
+                  : '—'}
               </div>
-              <div className="text-[10px] text-slate-500">
-                Less pressure to cover overheads
-              </div>
+              <div className="text-[10px] text-slate-500">Less pressure to cover overheads</div>
             </div>
 
             <div className="bg-white/80 p-3 rounded-xl border border-emerald-200">
-              <div className="text-[10px] text-slate-500 font-medium">
-                Optimized EBITDA Margin
-              </div>
-              {breakEvenMetrics.currentEbitdaMarginPct === null ||
-              breakEvenMetrics.currentEbitdaMarginPct === undefined ? (
+              <div className="text-[10px] text-slate-500 font-medium">Optimized EBITDA Margin</div>
+              {breakEvenMetrics.currentEbitdaMarginPct === null || breakEvenMetrics.currentEbitdaMarginPct === undefined ? (
                 <>
-                  <div className="text-base font-bold text-slate-400 mt-0.5">
-                    —
-                  </div>
-                  <div className="text-[10px] text-slate-500 font-medium">
-                    Needs purchases, wages &amp; expenses
-                  </div>
+                  <div className="text-base font-bold text-slate-400 mt-0.5">—</div>
+                  <div className="text-[10px] text-slate-500 font-medium">Needs purchases, wages &amp; expenses</div>
                 </>
               ) : (
                 <>
                   <div className="text-base font-bold text-emerald-800 mt-0.5">
                     {(
                       breakEvenMetrics.currentEbitdaMarginPct +
-                      ((breakEvenMetrics.channelShiftSimulation
-                        .newEbitdaMarginPct -
-                        breakEvenMetrics.currentEbitdaMarginPct) *
+                      ((breakEvenMetrics.channelShiftSimulation.newEbitdaMarginPct - breakEvenMetrics.currentEbitdaMarginPct) *
                         channelShiftSim) /
                         15
                     ).toFixed(1)}
                     %
                   </div>
                   <div className="text-[10px] text-emerald-700 font-medium">
-                    vs {breakEvenMetrics.currentEbitdaMarginPct.toFixed(1)}%
-                    current margin
+                    vs {breakEvenMetrics.currentEbitdaMarginPct.toFixed(1)}% current margin
                   </div>
                 </>
               )}
@@ -1288,7 +1054,9 @@ export const AggregatorPayoutUploadSection: React.FC<
             <FileSpreadsheet className="w-4 h-4 text-slate-600" />
             Uploaded Platform Settlement Statements ({payouts.length})
           </h3>
-          <span className="text-xs text-slate-500">Saved in database</span>
+          <span className="text-xs text-slate-500">
+            Saved in database
+          </span>
         </div>
 
         <div className="divide-y divide-slate-100 text-xs">
@@ -1300,26 +1068,24 @@ export const AggregatorPayoutUploadSection: React.FC<
               <div className="flex items-center gap-3">
                 <div
                   className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shrink-0 ${
-                    p.platform.toLowerCase() === "swiggy"
-                      ? "bg-amber-500"
-                      : p.platform.toLowerCase() === "zomato"
-                        ? "bg-rose-500"
-                        : "bg-indigo-600"
+                    p.platform.toLowerCase() === 'swiggy'
+                      ? 'bg-amber-500'
+                      : p.platform.toLowerCase() === 'zomato'
+                      ? 'bg-rose-500'
+                      : 'bg-indigo-600'
                   }`}
                 >
                   {p.platform.charAt(0).toUpperCase()}
                 </div>
                 <div>
                   <div className="font-bold text-slate-900 flex items-center gap-2">
-                    <span>
-                      {p.accountName || p.platform.toUpperCase()} Settlement
-                    </span>
+                    <span>{p.accountName || p.platform.toUpperCase()} Settlement</span>
                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 capitalize">
                       {p.outletId} Outlet
                     </span>
                     {p.periodType && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 capitalize">
-                        {p.periodType} {p.weekLabel ? `(${p.weekLabel})` : ""}
+                        {p.periodType} {p.weekLabel ? `(${p.weekLabel})` : ''}
                       </span>
                     )}
                   </div>
@@ -1341,8 +1107,7 @@ export const AggregatorPayoutUploadSection: React.FC<
                     {formatINR(p.grossSales)} Gross
                   </div>
                   <div className="text-[11px] font-bold text-emerald-700 font-mono">
-                    {formatINR(p.actualBankSettlement || p.calculatedNetPayout)}{" "}
-                    Net Credited
+                    {formatINR(p.actualBankSettlement || p.calculatedNetPayout)} Net Credited
                   </div>
                 </div>
 

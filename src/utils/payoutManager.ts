@@ -584,7 +584,8 @@ export function calculateGrowthMetrics(
   currentMonth: string = '2026-10',
   payouts: PlatformPayoutRecord[],
   parentDishes: ParentDish[],
-  outletFilter: OutletId = 'consolidated'
+  outletFilter: OutletId = 'consolidated',
+  salesRecords: RawSalesRecord[] = []
 ): GrowthAnalysisMetrics {
   const shiftMonth = (month: string, deltaMonths: number): string => {
     const [y, m] = month.split('-').map(Number);
@@ -612,18 +613,54 @@ export function calculateGrowthMetrics(
   // Growth is only reported when both periods have real statements; otherwise 0 (no data, no estimate).
   const getGrowth = (curr: number, base: number) => (curr > 0 && base > 0 ? ((curr - base) / base) * 100 : 0);
 
+  // Sales growth comes from Petpooja POS (complete for every channel); statements are often partial.
+  const posFor = (month: string) => {
+    const rows = (salesRecords || []).filter(
+      (r) =>
+        !r.isReturnOrCancelled &&
+        String(r.date || '').slice(0, 7) === month &&
+        (outletFilter === 'consolidated' || String(r.outlet || '').toLowerCase() === outletFilter)
+    );
+    const gross = rows.reduce((sum, r) => sum + (Number(r.revenue) || 0) + (r.isNetSales ? Number(r.discount) || 0 : 0), 0);
+    const orders = rows.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
+    return { has: rows.length > 0, gross, orders, aov: orders > 0 ? gross / orders : 0 };
+  };
+  const posCur = posFor(currentMonth);
+  const posPrev = posFor(previousMonth);
+  const posPrevYear = posFor(previousYearMonth);
+
+  // Payout growth only when both months carry statements for the same platforms / outlets / period types
+  const coverage = (month: string) =>
+    payouts
+      .filter((p) => p.month === month && (outletFilter === 'consolidated' || p.outletId === outletFilter))
+      .map((p) => `${p.platform}|${p.outletId}|${p.periodType || 'monthly'}|${p.periodType === 'weekly' ? (p.weekLabel || '').split(',').length : 1}`)
+      .sort()
+      .join(';');
+  const sameCoverage = (a: string, b: string) => coverage(a) !== '' && coverage(a) === coverage(b);
+  const payoutGrowth = (base: { net: number }, baseMonth: string) =>
+    sameCoverage(currentMonth, baseMonth) ? getGrowth(cur.net, base.net) : 0;
+  const salesGrowth = (
+    field: 'gross' | 'orders' | 'aov',
+    posBase: { has: boolean; gross: number; orders: number; aov: number },
+    base: { gross: number; orders: number; aov: number },
+    baseMonth: string
+  ) => {
+    if (posCur.has && posBase.has) return getGrowth(posCur[field], posBase[field]);
+    return sameCoverage(currentMonth, baseMonth) ? getGrowth(cur[field], base[field]) : 0;
+  };
+
   return {
     currentMonth,
     previousMonth,
     previousYearMonth,
-    momRevenueGrowthPct: getGrowth(cur.gross, prev.gross),
-    momNetPayoutGrowthPct: getGrowth(cur.net, prev.net),
-    momOrdersGrowthPct: getGrowth(cur.orders, prev.orders),
-    momAovGrowthPct: getGrowth(cur.aov, prev.aov),
-    yoyRevenueGrowthPct: getGrowth(cur.gross, prevYear.gross),
-    yoyNetPayoutGrowthPct: getGrowth(cur.net, prevYear.net),
-    yoyOrdersGrowthPct: getGrowth(cur.orders, prevYear.orders),
-    yoyAovGrowthPct: getGrowth(cur.aov, prevYear.aov),
+    momRevenueGrowthPct: salesGrowth('gross', posPrev, prev, previousMonth),
+    momNetPayoutGrowthPct: payoutGrowth(prev, previousMonth),
+    momOrdersGrowthPct: salesGrowth('orders', posPrev, prev, previousMonth),
+    momAovGrowthPct: salesGrowth('aov', posPrev, prev, previousMonth),
+    yoyRevenueGrowthPct: salesGrowth('gross', posPrevYear, prevYear, previousYearMonth),
+    yoyNetPayoutGrowthPct: payoutGrowth(prevYear, previousYearMonth),
+    yoyOrdersGrowthPct: salesGrowth('orders', posPrevYear, prevYear, previousYearMonth),
+    yoyAovGrowthPct: salesGrowth('aov', posPrevYear, prevYear, previousYearMonth),
     currentGrossRevenue: cur.gross,
     currentNetPayoutTotal: cur.net,
     currentDirectSales: cur.direct,
