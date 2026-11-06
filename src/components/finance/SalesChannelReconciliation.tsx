@@ -70,6 +70,38 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
   const posAggregatorBills = Math.round(posRecords.filter(isAggregator).reduce((s2, r) => s2 + (Number(r.quantity) || 0), 0));
   const statementCoverage = posAggregatorBills > 0 ? (totalOrders / posAggregatorBills) * 100 : 0;
 
+  // One row per channel and outlet from Petpooja POS, with the uploaded statement (if any) beside it
+  const channelOf = (r: RawSalesRecord) => {
+    const t = `${r.salesChannel || ''} ${r.rawItemName || ''}`.toLowerCase();
+    return t.includes('swiggy') ? 'swiggy' : t.includes('zomato') ? 'zomato' : t.includes('ownly') ? 'ownly' : 'direct';
+  };
+  const CHANNEL_LABEL: Record<string, string> = { swiggy: 'SWIGGY', zomato: 'ZOMATO', ownly: 'OWNLY', direct: 'DIRECT / DINE-IN / TAKEAWAY' };
+  const outletsInScope = currentOutlet === 'consolidated' ? ['banaswadi', 'whitefield'] : [currentOutlet];
+  const channelRows = outletsInScope.flatMap((outlet) =>
+    ['swiggy', 'zomato', 'ownly', 'direct'].map((channel) => {
+      const recs = posRecords.filter((r) => String(r.outlet || '').toLowerCase() === outlet && channelOf(r) === channel);
+      const orders = Math.round(recs.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0));
+      const discounts = recs.reduce((sum, r) => sum + (Number(r.discount) || 0), 0);
+      const net = recs.reduce((sum, r) => sum + (Number(r.revenue) || 0) - (r.isNetSales ? 0 : Number(r.discount) || 0), 0);
+      const gross = net + discounts;
+      const stmts = relevantPayouts.filter((p) => p.outletId === outlet && p.platform.toLowerCase() === channel);
+      const stmtOrders = stmts.reduce((sum, p) => sum + p.orderCount, 0);
+      const stmtNetSales = stmts.reduce((sum, p) => sum + p.netSales, 0);
+      const stmtCommission = stmts.reduce((sum, p) => sum + p.commissionAmount, 0);
+      const stmtPayout = stmts.reduce((sum, p) => sum + (p.actualBankSettlement || p.calculatedNetPayout), 0);
+      const status =
+        channel === 'direct'
+          ? 'direct'
+          : stmts.length === 0
+          ? 'missing'
+          : orders > 0 && stmtOrders < orders * 0.9
+          ? 'partial'
+          : 'uploaded';
+      return { key: `${outlet}-${channel}`, outlet, channel, orders, gross, discounts, net, stmtOrders, stmtNetSales, stmtCommission, stmtPayout, status };
+    })
+  ).filter((r) => r.orders > 0 || r.stmtOrders > 0);
+  const sum = (k: 'orders' | 'gross' | 'discounts' | 'net' | 'stmtPayout') => channelRows.reduce((a, r) => a + r[k], 0);
+
   return (
     <div className="space-y-6">
       {/* Header Info Banner */}
@@ -149,9 +181,9 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-600 uppercase font-semibold text-[11px]">
-                <th className="py-3 px-4">Sales Channel / Account</th>
+                <th className="py-3 px-4">Sales Channel</th>
                 <th className="py-3 px-4">Outlet</th>
-                <th className="py-3 px-4 text-right">Orders</th>
+                <th className="py-3 px-4 text-right">POS Orders</th>
                 <th className="py-3 px-4 text-right">Gross Sales</th>
                 <th className="py-3 px-4 text-right">Discounts</th>
                 <th className="py-3 px-4 text-right font-semibold text-slate-900">Net Sales</th>
@@ -161,62 +193,76 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {relevantPayouts.map((p) => {
-                const effectiveCommissionRate =
-                  p.netSales > 0 ? ((p.commissionAmount / p.netSales) * 100).toFixed(1) : p.commissionRate;
-                return (
-                  <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
-                    <td className="py-3.5 px-4">
-                      <div className="font-bold text-slate-900">{p.accountName || p.platform.toUpperCase()}</div>
-                      {p.accountId && (
-                        <div className="text-[10px] text-slate-500 font-mono">
-                          Merchant ID: {p.accountId}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 capitalize">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                          p.outletId === 'whitefield'
-                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                            : 'bg-teal-50 text-teal-700 border border-teal-200'
-                        }`}
-                      >
-                        {p.outletId}
+              {channelRows.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="py-6 text-center text-slate-500">
+                    No Petpooja POS data or statements for this month.
+                  </td>
+                </tr>
+              )}
+              {channelRows.map((r) => (
+                <tr key={r.key} className="hover:bg-slate-50/60 transition-colors">
+                  <td className="py-3.5 px-4 font-bold text-slate-900">{CHANNEL_LABEL[r.channel]}</td>
+                  <td className="py-3.5 px-4 capitalize">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                        r.outlet === 'whitefield'
+                          ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                          : 'bg-teal-50 text-teal-700 border border-teal-200'
+                      }`}
+                    >
+                      {r.outlet}
+                    </span>
+                  </td>
+                  <td className="py-3.5 px-4 text-right font-medium">{r.orders.toLocaleString('en-IN')}</td>
+                  <td className="py-3.5 px-4 text-right font-medium">{formatINR(r.gross)}</td>
+                  <td className="py-3.5 px-4 text-right text-rose-600">-{formatINR(r.discounts)}</td>
+                  <td className="py-3.5 px-4 text-right font-bold text-slate-900">{formatINR(r.net)}</td>
+                  <td className="py-3.5 px-4 text-right">
+                    {r.channel === 'direct' ? (
+                      <span className="font-semibold text-emerald-700">0%</span>
+                    ) : r.stmtNetSales > 0 ? (
+                      <span className="font-semibold text-indigo-700">{((r.stmtCommission / r.stmtNetSales) * 100).toFixed(1)}%</span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="py-3.5 px-4 text-right font-bold text-emerald-700">
+                    {r.channel === 'direct' ? formatINR(r.net) : r.stmtPayout > 0 ? formatINR(r.stmtPayout) : <span className="text-slate-400 font-normal">—</span>}
+                  </td>
+                  <td className="py-3.5 px-4 text-center">
+                    {r.status === 'direct' ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Direct (no commission)
                       </span>
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-medium">{p.orderCount}</td>
-                    <td className="py-3.5 px-4 text-right font-medium">{formatINR(p.grossSales)}</td>
-                    <td className="py-3.5 px-4 text-right text-rose-600">-{formatINR(p.customerDiscounts)}</td>
-                    <td className="py-3.5 px-4 text-right font-bold text-slate-900">{formatINR(p.netSales)}</td>
-                    <td className="py-3.5 px-4 text-right">
-                      <span className="font-semibold text-indigo-700">{effectiveCommissionRate}%</span>
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-bold text-emerald-700">
-                      {formatINR(p.calculatedNetPayout)}
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
+                    ) : r.status === 'uploaded' ? (
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                         <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Statement Uploaded
                       </span>
-                    </td>
-                  </tr>
-                );
-              })}
+                    ) : r.status === 'partial' ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200" title="Statements cover only part of this channel's POS orders">
+                        Partial: {r.stmtOrders}/{r.orders} orders
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                        Statement Not Uploaded
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-slate-300 bg-slate-100/70 font-bold text-slate-900">
-                <td className="py-3.5 px-4">Total (uploaded statements)</td>
+                <td className="py-3.5 px-4">Total</td>
                 <td className="py-3.5 px-4"></td>
-                <td className="py-3.5 px-4 text-right">{totalOrders} bills</td>
-                <td className="py-3.5 px-4 text-right">{formatINR(totalGross)}</td>
-                <td className="py-3.5 px-4 text-right text-rose-700">
-                  -{formatINR(relevantPayouts.reduce((sum, p) => sum + p.customerDiscounts, 0))}
-                </td>
-                <td className="py-3.5 px-4 text-right text-slate-950 font-black">{formatINR(totalNet)}</td>
+                <td className="py-3.5 px-4 text-right">{sum('orders').toLocaleString('en-IN')} bills</td>
+                <td className="py-3.5 px-4 text-right">{formatINR(sum('gross'))}</td>
+                <td className="py-3.5 px-4 text-right text-rose-700">-{formatINR(sum('discounts'))}</td>
+                <td className="py-3.5 px-4 text-right text-slate-950 font-black">{formatINR(sum('net'))}</td>
                 <td className="py-3.5 px-4 text-right">—</td>
                 <td className="py-3.5 px-4 text-right text-emerald-800 font-black">
-                  {formatINR(relevantPayouts.reduce((sum, p) => sum + p.calculatedNetPayout, 0))}
+                  {formatINR(channelRows.reduce((a, r) => a + (r.channel === 'direct' ? r.net : r.stmtPayout), 0))}
                 </td>
                 <td className="py-3.5 px-4 text-center">{relevantPayouts.length} statement(s)</td>
               </tr>
