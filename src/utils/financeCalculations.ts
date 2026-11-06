@@ -182,6 +182,7 @@ export function generateMonthlyPnL(
   // Platform statements for THIS month (and outlet) only
   const relevantPayouts = payouts.filter((p) => {
     if (p.month && p.month !== month) return false;
+    if (/house\s*of\s*terreti/i.test(String((p as any).accountName || ''))) return false;
     if (isConsolidated) return true;
     return p.outletId === outlet;
   });
@@ -189,6 +190,8 @@ export function generateMonthlyPnL(
   // Petpooja POS rows saved for this month (and outlet): the sales source of truth
   const monthSales = (salesRecords || []).filter((r) => {
     if (!r.date || String(r.date).slice(0, 7) !== month) return false;
+    // Inactive brand "House Of Terreti" is excluded from active financial reporting
+    if (/house\s*of\s*terreti/i.test(`${r.rawItemName || ''} ${r.salesChannel || ''}`)) return false;
     if (isConsolidated) return true;
     return String(r.outlet || '').toLowerCase() === outlet;
   });
