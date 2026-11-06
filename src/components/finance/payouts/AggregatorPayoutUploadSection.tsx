@@ -221,6 +221,28 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
   const rowsNetCredited = channelMatchReport.channelReports.reduce((s, c) => s + c.payoutNetCredited, 0);
   const anyIncomplete = channelMatchReport.channelReports.some((c) => noStatement(c) || partialStatement(c));
 
+  // Which brand a channel's statements belong to: the POS brand row with exactly the same order count
+  const brandMatchFor = (channel: string, payoutOrders: number) => {
+    if (channel === 'direct' || !(payoutOrders > 0)) return null;
+    const groups: Record<string, number> = {};
+    rawRecords
+      .filter((r) => !selectedMonth || (r.date || '').startsWith(selectedMonth))
+      .filter((r) => selectedOutlet === 'consolidated' || String(r.outlet || '').toLowerCase() === selectedOutlet)
+      .filter((r) => `${r.salesChannel || ''} ${r.rawItemName || ''}`.toLowerCase().includes(channel))
+      .forEach((r) => {
+        const brand = String(r.rawItemName || '')
+          .replace(/\s*[-–]\s*(swiggy|zomato|ownly)\s*$/i, '')
+          .replace(/\s*-?\s*w\s*$/i, ' (Whitefield)')
+          .trim();
+        const label = /\(Whitefield\)$/.test(brand) || String(r.outlet || '').toLowerCase() === 'whitefield'
+          ? brand.replace(/ \(Whitefield\)$/, '') + ' · Whitefield'
+          : brand + ' · Banaswadi';
+        groups[label] = (groups[label] || 0) + (Number(r.quantity) || 0);
+      });
+    const exact = Object.entries(groups).filter(([, q]) => Math.round(q) === payoutOrders);
+    return exact.length === 1 ? { brand: exact[0][0], brands: Object.keys(groups).length } : null;
+  };
+
   // Headline Calculations
   const totalDirectSales = useMemo(() => {
     const directChannel = channelMatchReport.channelReports.find((c) => c.channel === 'direct');
@@ -626,7 +648,17 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                           : 'bg-emerald-500'
                       }`}
                     />
-                    {c.channelLabel}
+                    <span>
+                      {c.channelLabel}
+                      {(() => {
+                        const m = brandMatchFor(c.channel, c.payoutOrders);
+                        return m ? (
+                          <span className="block text-[10px] font-medium text-emerald-700">
+                            Statement = {m.brand} ({c.payoutOrders}/{c.payoutOrders} orders matched)
+                          </span>
+                        ) : null;
+                      })()}
+                    </span>
                   </td>
                   <td className="py-3.5 px-3 text-right font-mono text-slate-800">
                     {formatINR(c.posGrossSales)}
@@ -645,7 +677,7 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                     {c.payoutOrders.toLocaleString()}
                   </td>
                   <td className="py-3.5 px-3 text-right font-mono font-bold text-emerald-700">
-                    {formatINR(c.payoutNetCredited)}
+                    {noStatement(c) ? <span className="text-slate-400 font-normal">—</span> : formatINR(c.payoutNetCredited)}
                   </td>
                   <td className="py-3.5 px-3 text-right font-mono font-semibold">
                     {noStatement(c) ? (
@@ -672,7 +704,10 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                       </span>
                     ) : partialStatement(c) ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title={`Statements cover ${c.payoutOrders} of ${c.posOrders} POS orders. Upload the missing brands / outlets / weeks.`}>
-                        Partial: {c.payoutOrders}/{c.posOrders} orders
+                        {(() => {
+                          const m = brandMatchFor(c.channel, c.payoutOrders);
+                          return m ? `Partial: 1 of ${m.brands} brands` : `Partial: ${c.payoutOrders}/${c.posOrders} orders`;
+                        })()}
                       </span>
                     ) : (
                       <span
