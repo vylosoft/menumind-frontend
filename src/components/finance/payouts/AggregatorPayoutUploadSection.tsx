@@ -216,10 +216,12 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     c.channel !== 'direct' && !(c.payoutGrossSales > 0);
   const partialStatement = (c: { channel: string; payoutGrossSales: number; payoutOrders: number; posOrders: number }) =>
     !noStatement(c) && c.channel !== 'direct' && c.posOrders > 0 && c.payoutOrders < c.posOrders * 0.9;
-  const coveredRows = channelMatchReport.channelReports.filter((c) => !noStatement(c));
+  const noPos = (c: { channel: string; posOrders: number; posGrossSales: number }) =>
+    c.channel !== 'direct' && !(c.posOrders > 0) && !(c.posGrossSales > 0);
+  const coveredRows = channelMatchReport.channelReports.filter((c) => !noStatement(c) && !noPos(c));
   const coveredVariance = coveredRows.reduce((s, c) => s + c.varianceGross, 0);
   const rowsNetCredited = channelMatchReport.channelReports.reduce((s, c) => s + c.payoutNetCredited, 0);
-  const anyIncomplete = channelMatchReport.channelReports.some((c) => noStatement(c) || partialStatement(c));
+  const anyIncomplete = channelMatchReport.channelReports.some((c) => noStatement(c) || partialStatement(c) || noPos(c));
 
   // Which brand a channel's statements belong to: the POS brand row with exactly the same order count
   const brandMatchFor = (channel: string, payoutOrders: number) => {
@@ -680,7 +682,7 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                     {noStatement(c) ? <span className="text-slate-400 font-normal">—</span> : formatINR(c.payoutNetCredited)}
                   </td>
                   <td className="py-3.5 px-3 text-right font-mono font-semibold">
-                    {noStatement(c) ? (
+                    {noStatement(c) || noPos(c) ? (
                       <span className="text-slate-400">—</span>
                     ) : (
                     <span
@@ -701,6 +703,10 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                     {noStatement(c) ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600" title="Upload this month's settlement statement to reconcile">
                         Statement Not Uploaded
+                      </span>
+                    ) : noPos(c) ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600" title="Upload this month's Petpooja POS report to compare">
+                        POS Not Uploaded
                       </span>
                     ) : partialStatement(c) ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title={`Statements cover ${c.payoutOrders} of ${c.posOrders} POS orders. Upload the missing brands / outlets / weeks.`}>
