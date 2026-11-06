@@ -223,7 +223,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </div>
           <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
             <span className="font-semibold text-teal-700">Net Sales</span>
-            <span>from {reconciliation.validRows.toLocaleString()} orders</span>
+            <span>from {reconciliation.validRows.toLocaleString()} POS report rows</span>
           </div>
         </div>
 
