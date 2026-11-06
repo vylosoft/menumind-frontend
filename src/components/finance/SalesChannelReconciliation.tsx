@@ -77,29 +77,51 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
   };
   const CHANNEL_LABEL: Record<string, string> = { swiggy: 'SWIGGY', zomato: 'ZOMATO', ownly: 'OWNLY', direct: 'DIRECT / DINE-IN / TAKEAWAY' };
   const outletsInScope = currentOutlet === 'consolidated' ? ['banaswadi', 'whitefield'] : [currentOutlet];
-  const channelRows = outletsInScope.flatMap((outlet) =>
-    ['swiggy', 'zomato', 'ownly', 'direct'].map((channel) => {
+  // Brand as written in the Sub-Order report: "Niraamish - W - Zomato" -> "Niraamish"
+  const brandOf = (r: RawSalesRecord) =>
+    String(r.rawItemName || '')
+      .replace(/\s*[-–]\s*(swiggy|zomato|ownly)\s*$/i, '')
+      .replace(/\s*-?\s*w\s*$/i, '')
+      .replace(/\s*-\s*$/, '')
+      .trim() || 'Other';
+  type ChannelRow = {
+    key: string; outlet: string; channel: string; brand: string; orders: number; gross: number; discounts: number; net: number;
+    stmtOrders: number; stmtNetSales: number; stmtCommission: number; stmtPayout: number; status: string;
+  };
+  const channelRows: ChannelRow[] = outletsInScope.flatMap((outlet) =>
+    ['swiggy', 'zomato', 'ownly', 'direct'].flatMap((channel) => {
       const recs = posRecords.filter((r) => String(r.outlet || '').toLowerCase() === outlet && channelOf(r) === channel);
-      const orders = Math.round(recs.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0));
-      const discounts = recs.reduce((sum, r) => sum + (Number(r.discount) || 0), 0);
-      const net = recs.reduce((sum, r) => sum + (Number(r.revenue) || 0) - (r.isNetSales ? 0 : Number(r.discount) || 0), 0);
-      const gross = net + discounts;
       const stmts = relevantPayouts.filter((p) => p.outletId === outlet && p.platform.toLowerCase() === channel);
-      const stmtOrders = stmts.reduce((sum, p) => sum + p.orderCount, 0);
-      const stmtNetSales = stmts.reduce((sum, p) => sum + p.netSales, 0);
-      const stmtCommission = stmts.reduce((sum, p) => sum + p.commissionAmount, 0);
-      const stmtPayout = stmts.reduce((sum, p) => sum + (p.actualBankSettlement || p.calculatedNetPayout), 0);
-      const status =
-        channel === 'direct'
-          ? 'direct'
-          : stmts.length === 0
-          ? 'missing'
-          : orders > 0 && stmtOrders < orders * 0.9
-          ? 'partial'
-          : 'uploaded';
-      return { key: `${outlet}-${channel}`, outlet, channel, orders, gross, discounts, net, stmtOrders, stmtNetSales, stmtCommission, stmtPayout, status };
+      const stmtOrders = stmts.reduce((t, p) => t + p.orderCount, 0);
+      const stmtNetSales = stmts.reduce((t, p) => t + p.netSales, 0);
+      const stmtCommission = stmts.reduce((t, p) => t + p.commissionAmount, 0);
+      const stmtPayout = stmts.reduce((t, p) => t + (p.actualBankSettlement || p.calculatedNetPayout), 0);
+      const brands = channel === 'direct' ? ['Direct'] : [...new Set(recs.map(brandOf))];
+      const rows = brands.map((brand) => {
+        const br = channel === 'direct' ? recs : recs.filter((r) => brandOf(r) === brand);
+        const orders = Math.round(br.reduce((t, r) => t + (Number(r.quantity) || 0), 0));
+        const discounts = br.reduce((t, r) => t + (Number(r.discount) || 0), 0);
+        const net = br.reduce((t, r) => t + (Number(r.revenue) || 0) - (r.isNetSales ? 0 : Number(r.discount) || 0), 0);
+        return { key: `${outlet}-${channel}-${brand}`, outlet, channel, brand, orders, gross: net + discounts, discounts, net,
+          stmtOrders: 0, stmtNetSales: 0, stmtCommission: 0, stmtPayout: 0, status: channel === 'direct' ? 'direct' : 'missing' } as ChannelRow;
+      });
+      if (stmts.length > 0) {
+        // Statements carry no brand: give them to the brand whose POS orders they match exactly
+        const exact = rows.filter((r) => r.orders === stmtOrders);
+        const target = exact.length === 1 ? exact[0] : rows.length === 1 ? rows[0] : null;
+        const attach = (r: ChannelRow) => {
+          Object.assign(r, { stmtOrders, stmtNetSales, stmtCommission, stmtPayout });
+          r.status = r.orders > 0 && stmtOrders < r.orders * 0.9 ? 'partial' : 'uploaded';
+        };
+        if (target) attach(target);
+        else {
+          rows.push({ key: `${outlet}-${channel}-stmt`, outlet, channel, brand: 'Statements (brand not identified)', orders: 0, gross: 0, discounts: 0, net: 0,
+            stmtOrders, stmtNetSales, stmtCommission, stmtPayout, status: 'uploaded' });
+        }
+      }
+      return rows.filter((r) => r.orders > 0 || r.stmtOrders > 0);
     })
-  ).filter((r) => r.orders > 0 || r.stmtOrders > 0);
+  );
   const sum = (k: 'orders' | 'gross' | 'discounts' | 'net' | 'stmtPayout') => channelRows.reduce((a, r) => a + r[k], 0);
 
   return (
@@ -202,7 +224,10 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
               )}
               {channelRows.map((r) => (
                 <tr key={r.key} className="hover:bg-slate-50/60 transition-colors">
-                  <td className="py-3.5 px-4 font-bold text-slate-900">{CHANNEL_LABEL[r.channel]}</td>
+                  <td className="py-3.5 px-4">
+                    <div className="font-bold text-slate-900">{CHANNEL_LABEL[r.channel]}</div>
+                    {r.channel !== 'direct' && <div className="text-[10px] text-slate-500">{r.brand}</div>}
+                  </td>
                   <td className="py-3.5 px-4 capitalize">
                     <span
                       className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
@@ -237,7 +262,7 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
                       </span>
                     ) : r.status === 'uploaded' ? (
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Statement Uploaded
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> {r.stmtOrders === r.orders ? `Matched ${r.stmtOrders}/${r.orders} orders` : 'Statement Uploaded'}
                       </span>
                     ) : r.status === 'partial' ? (
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200" title="Statements cover only part of this channel's POS orders">
