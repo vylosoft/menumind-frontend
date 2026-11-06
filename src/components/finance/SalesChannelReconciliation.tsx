@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { OutletId, PlatformPayoutRecord } from '../../types/finance';
+import { RawSalesRecord } from '../../types/restaurant';
 import { formatINR, formatPct } from '../../utils/financeCalculations';
 import {
   CheckCircle2,
@@ -17,25 +18,32 @@ import {
   ExternalLink,
   Info,
 } from 'lucide-react';
-import {
-  BRAND_FILTER_RULES,
-  OCTOBER_2026_BENCHMARKS,
-} from '../../data/financeBaseline';
+import { BRAND_FILTER_RULES } from '../../data/financeBaseline';
 
 interface SalesChannelReconciliationProps {
   currentOutlet: OutletId;
   payouts: PlatformPayoutRecord[];
   onSelectOutlet: (outlet: OutletId) => void;
+  rawRecords?: RawSalesRecord[];
+  selectedMonth?: string;
 }
 
 export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProps> = ({
   currentOutlet,
   payouts,
   onSelectOutlet,
+  rawRecords = [],
+  selectedMonth,
 }) => {
   const [excludeHouseOfTerreti, setExcludeHouseOfTerreti] = useState(true);
 
+  const inMonth = (m?: string) => !selectedMonth || !m || m.slice(0, 7) === selectedMonth;
+  const isTerreti = (name?: string) => /house\s*of\s*terreti/i.test(String(name || ''));
+
+  // Platform statements for the selected month and outlet
   const relevantPayouts = payouts.filter((p) => {
+    if (!inMonth(p.month)) return false;
+    if (excludeHouseOfTerreti && isTerreti(p.accountName)) return false;
     if (currentOutlet === 'consolidated') return true;
     return p.outletId === currentOutlet;
   });
@@ -45,16 +53,22 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
   const totalOrders = relevantPayouts.reduce((sum, p) => sum + p.orderCount, 0);
   const totalCommissions = relevantPayouts.reduce((sum, p) => sum + p.commissionAmount, 0);
 
-  // Benchmarks comparison
-  const benchmark =
-    currentOutlet === 'banaswadi'
-      ? OCTOBER_2026_BENCHMARKS.banaswadi
-      : currentOutlet === 'whitefield'
-      ? OCTOBER_2026_BENCHMARKS.whitefield
-      : OCTOBER_2026_BENCHMARKS.consolidated;
-
-  const orderDifference = totalOrders - benchmark.orders;
-  const salesDifference = totalGross - benchmark.grossSales;
+  // Petpooja POS saved for the selected month and outlet (the figures these cards are named after)
+  const posRecords = rawRecords.filter((r) => {
+    if (r.isReturnOrCancelled) return false;
+    if (!inMonth(r.date)) return false;
+    if (excludeHouseOfTerreti && (isTerreti(r.rawItemName) || isTerreti(r.salesChannel))) return false;
+    if (currentOutlet === 'consolidated') return true;
+    return String(r.outlet || '').toLowerCase() === currentOutlet;
+  });
+  const posBills = Math.round(posRecords.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0));
+  const posNetSales = posRecords.reduce(
+    (sum, r) => sum + (Number(r.revenue) || 0) - (r.isNetSales ? 0 : Number(r.discount) || 0),
+    0
+  );
+  const isAggregator = (r: RawSalesRecord) => /swiggy|zomato|ownly/i.test(`${r.salesChannel || ''} ${r.rawItemName || ''}`);
+  const posAggregatorBills = Math.round(posRecords.filter(isAggregator).reduce((s2, r) => s2 + (Number(r.quantity) || 0), 0));
+  const statementCoverage = posAggregatorBills > 0 ? (totalOrders / posAggregatorBills) * 100 : 0;
 
   return (
     <div className="space-y-6">
@@ -88,26 +102,25 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
         <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
           <div className="text-xs font-semibold text-slate-500 uppercase">Petpooja POS Total Bills</div>
           <div className="text-2xl font-black text-slate-900 mt-2 flex items-baseline gap-2">
-            <span>{totalOrders} Bills</span>
-            <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Exact Match
-            </span>
+            <span>{posBills.toLocaleString('en-IN')} Bills</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">
-            Benchmark: {benchmark.orders} bills ({orderDifference === 0 ? '0 discrepancy' : `${orderDifference} variance`})
+            {posBills === 0
+              ? 'No Petpooja POS upload for this month'
+              : `Aggregator bills: ${posAggregatorBills.toLocaleString('en-IN')} · on uploaded statements: ${totalOrders.toLocaleString('en-IN')}`}
           </div>
         </div>
 
         <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
           <div className="text-xs font-semibold text-slate-500 uppercase">Petpooja Recorded Sales</div>
           <div className="text-2xl font-black text-slate-900 mt-2 flex items-baseline gap-2">
-            <span>{formatINR(totalGross)}</span>
-            <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Reconciled
-            </span>
+            <span>{formatINR(posNetSales)}</span>
+            <span className="text-xs font-semibold text-slate-500">net sales</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">
-            Target Benchmark: {formatINR(benchmark.grossSales)} ({salesDifference === 0 ? 'Exact 100%' : `${formatINR(salesDifference)} diff`})
+            {totalOrders === 0
+              ? 'No platform statement uploaded for this month'
+              : `Statements cover ${formatPct(Math.min(statementCoverage, 100))} of aggregator bills (gross ${formatINR(totalGross)})`}
           </div>
         </div>
 
@@ -184,7 +197,7 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
                     </td>
                     <td className="py-3.5 px-4 text-center">
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Reconciled
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Statement Uploaded
                       </span>
                     </td>
                   </tr>
@@ -193,7 +206,7 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-slate-300 bg-slate-100/70 font-bold text-slate-900">
-                <td className="py-3.5 px-4">Total Reconciled</td>
+                <td className="py-3.5 px-4">Total (uploaded statements)</td>
                 <td className="py-3.5 px-4"></td>
                 <td className="py-3.5 px-4 text-right">{totalOrders} bills</td>
                 <td className="py-3.5 px-4 text-right">{formatINR(totalGross)}</td>
@@ -205,7 +218,7 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
                 <td className="py-3.5 px-4 text-right text-emerald-800 font-black">
                   {formatINR(relevantPayouts.reduce((sum, p) => sum + p.calculatedNetPayout, 0))}
                 </td>
-                <td className="py-3.5 px-4 text-center">100% Balanced</td>
+                <td className="py-3.5 px-4 text-center">{relevantPayouts.length} statement(s)</td>
               </tr>
             </tfoot>
           </table>

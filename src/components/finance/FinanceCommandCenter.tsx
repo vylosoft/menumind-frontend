@@ -576,6 +576,8 @@ export const FinanceCommandCenter: React.FC<FinanceCommandCenterProps> = ({
             currentOutlet={currentOutlet}
             payouts={payouts}
             onSelectOutlet={setCurrentOutlet}
+            rawRecords={rawRecords}
+            selectedMonth={selectedMonth}
           />
         )}
 
