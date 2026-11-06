@@ -218,7 +218,7 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     !noStatement(c) && c.channel !== 'direct' && c.posOrders > 0 && c.payoutOrders < c.posOrders * 0.9;
   const noPos = (c: { channel: string; posOrders: number; posGrossSales: number }) =>
     c.channel !== 'direct' && !(c.posOrders > 0) && !(c.posGrossSales > 0);
-  const coveredRows = channelMatchReport.channelReports.filter((c) => !noStatement(c) && !noPos(c));
+  const coveredRows = channelMatchReport.channelReports.filter((c) => !noStatement(c) && !noPos(c) && !partialStatement(c));
   const coveredVariance = coveredRows.reduce((s, c) => s + c.varianceGross, 0);
   const rowsNetCredited = channelMatchReport.channelReports.reduce((s, c) => s + c.payoutNetCredited, 0);
   const anyIncomplete = channelMatchReport.channelReports.some((c) => noStatement(c) || partialStatement(c) || noPos(c));
@@ -690,6 +690,10 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                   <td className="py-3.5 px-3 text-right font-mono font-semibold">
                     {noStatement(c) || noPos(c) ? (
                       <span className="text-slate-400">—</span>
+                    ) : partialStatement(c) ? (
+                      <span className="text-slate-400" title="Shown once every brand's statement for this channel is uploaded">
+                        — <span className="block text-[10px] font-normal">orders: {c.payoutOrders}/{c.payoutOrders} matched</span>
+                      </span>
                     ) : (
                     <span
                       className={
