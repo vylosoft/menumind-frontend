@@ -211,6 +211,16 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     });
   }, [staffDirectory, operatingExpenses, payouts, selectedOutlet, selectedMonth, channelMatchReport, purchases]);
 
+  // Statement coverage per channel: a channel can only be reconciled against statements that were uploaded.
+  const noStatement = (c: { channel: string; payoutGrossSales: number }) =>
+    c.channel !== 'direct' && !(c.payoutGrossSales > 0);
+  const partialStatement = (c: { channel: string; payoutGrossSales: number; payoutOrders: number; posOrders: number }) =>
+    !noStatement(c) && c.channel !== 'direct' && c.posOrders > 0 && c.payoutOrders < c.posOrders * 0.9;
+  const coveredRows = channelMatchReport.channelReports.filter((c) => !noStatement(c));
+  const coveredVariance = coveredRows.reduce((s, c) => s + c.varianceGross, 0);
+  const rowsNetCredited = channelMatchReport.channelReports.reduce((s, c) => s + c.payoutNetCredited, 0);
+  const anyIncomplete = channelMatchReport.channelReports.some((c) => noStatement(c) || partialStatement(c));
+
   // Headline Calculations
   const totalDirectSales = useMemo(() => {
     const directChannel = channelMatchReport.channelReports.find((c) => c.channel === 'direct');
@@ -632,6 +642,9 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                     {formatINR(c.payoutNetCredited)}
                   </td>
                   <td className="py-3.5 px-3 text-right font-mono font-semibold">
+                    {noStatement(c) ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
                     <span
                       className={
                         Math.abs(c.varianceGross) <= 500
@@ -644,24 +657,35 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                       {c.varianceGross >= 0 ? '+' : ''}
                       {formatINR(c.varianceGross)}
                     </span>
+                    )}
                   </td>
                   <td className="py-3.5 px-4 text-center">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                        c.matchStatus === 'matched'
-                          ? 'bg-emerald-100 text-emerald-800'
+                    {noStatement(c) ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600" title="Upload this month's settlement statement to reconcile">
+                        Statement Not Uploaded
+                      </span>
+                    ) : partialStatement(c) ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title={`Statements cover ${c.payoutOrders} of ${c.posOrders} POS orders. Upload the missing brands / outlets / weeks.`}>
+                        Partial: {c.payoutOrders}/{c.posOrders} orders
+                      </span>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                          c.matchStatus === 'matched'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : c.matchStatus === 'minor_variance'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-rose-100 text-rose-800'
+                        }`}
+                      >
+                        {c.matchStatus === 'matched' && <Check className="w-3 h-3" />}
+                        {c.matchStatus === 'matched'
+                          ? '100% Matched'
                           : c.matchStatus === 'minor_variance'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-rose-100 text-rose-800'
-                      }`}
-                    >
-                      {c.matchStatus === 'matched' && <Check className="w-3 h-3" />}
-                      {c.matchStatus === 'matched'
-                        ? '100% Matched'
-                        : c.matchStatus === 'minor_variance'
-                        ? 'Minor Variance'
-                        : 'Review Discrepancy'}
-                    </span>
+                          ? 'Minor Variance'
+                          : 'Review Discrepancy'}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -682,12 +706,18 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                   {channelMatchReport.channelReports.reduce((s, c) => s + c.payoutOrders, 0).toLocaleString()}
                 </td>
                 <td className="py-3 px-3 text-right font-mono text-emerald-700">
-                  {formatINR(netRealizedBankInflow)}
+                  {formatINR(rowsNetCredited)}
                 </td>
-                <td className="py-3 px-3 text-right font-mono">
-                  {formatINR(channelMatchReport.overallVariance)}
+                <td className="py-3 px-3 text-right font-mono" title="Variance of channels that have a statement">
+                  {coveredVariance >= 0 ? '+' : ''}
+                  {formatINR(coveredVariance)}
                 </td>
                 <td className="py-3 px-4 text-center">
+                  {anyIncomplete ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                      Statements Incomplete
+                    </span>
+                  ) : (
                   <span
                     className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                       channelMatchReport.overallStatus === 'matched'
@@ -698,11 +728,12 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                     }`}
                   >
                     {channelMatchReport.overallStatus === 'matched'
-                      ? 'Reconciled'
+                      ? '100% Matched'
                       : channelMatchReport.overallStatus === 'minor_variance'
                       ? 'Minor Variance'
                       : 'Review Discrepancy'}
                   </span>
+                  )}
                 </td>
               </tr>
             </tfoot>
