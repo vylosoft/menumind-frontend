@@ -106,15 +106,25 @@ export const SalesChannelReconciliation: React.FC<SalesChannelReconciliationProp
           stmtOrders: 0, stmtNetSales: 0, stmtCommission: 0, stmtPayout: 0, status: channel === 'direct' ? 'direct' : 'missing' } as ChannelRow;
       });
       if (stmts.length > 0) {
-        // Statements carry no brand: give them to the brand whose POS orders they match exactly
-        const exact = rows.filter((r) => r.orders === stmtOrders);
-        const target = exact.length === 1 ? exact[0] : rows.length === 1 ? rows[0] : null;
-        const attach = (r: ChannelRow) => {
-          Object.assign(r, { stmtOrders, stmtNetSales, stmtCommission, stmtPayout });
-          r.status = r.orders > 0 && stmtOrders < r.orders * 0.9 ? 'partial' : 'uploaded';
-        };
-        if (target) attach(target);
-        else {
+        // Statements carry no brand: find the brand(s) whose POS orders add up exactly to the statement orders
+        let matched: ChannelRow[] | null = null;
+        const n = rows.length;
+        for (let mask = 1; mask < 1 << n && !matched; mask++) {
+          const pick = rows.filter((_, i) => mask & (1 << i));
+          if (pick.reduce((t, r) => t + r.orders, 0) === stmtOrders) matched = pick;
+        }
+        if (!matched && rows.length === 1) matched = rows;
+        if (matched) {
+          const base = matched.reduce((t, r) => t + r.net, 0) || 1;
+          matched.forEach((r) => {
+            const share = matched!.length === 1 ? 1 : r.net / base;
+            r.stmtOrders = matched!.length === 1 ? stmtOrders : r.orders;
+            r.stmtNetSales = stmtNetSales * share;
+            r.stmtCommission = stmtCommission * share;
+            r.stmtPayout = stmtPayout * share;
+            r.status = r.orders > 0 && r.stmtOrders < r.orders * 0.9 ? 'partial' : 'uploaded';
+          });
+        } else {
           rows.push({ key: `${outlet}-${channel}-stmt`, outlet, channel, brand: 'Statements (brand not identified)', orders: 0, gross: 0, discounts: 0, net: 0,
             stmtOrders, stmtNetSales, stmtCommission, stmtPayout, status: 'uploaded' });
         }

@@ -241,8 +241,14 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
           : brand + ' · Banaswadi';
         groups[label] = (groups[label] || 0) + (Number(r.quantity) || 0);
       });
-    const exact = Object.entries(groups).filter(([, q]) => Math.round(q) === payoutOrders);
-    return exact.length === 1 ? { brand: exact[0][0], brands: Object.keys(groups).length } : null;
+    // Smallest set of brands whose POS orders add up exactly to the statement orders
+    const entries = Object.entries(groups).map(([b, q]) => [b, Math.round(q)] as [string, number]);
+    let best: string[] | null = null;
+    for (let mask = 1; mask < 1 << entries.length; mask++) {
+      const pick = entries.filter((_, i) => mask & (1 << i));
+      if (pick.reduce((t, [, q]) => t + q, 0) === payoutOrders && (!best || pick.length < best.length)) best = pick.map(([b]) => b);
+    }
+    return best ? { brand: best.join(' + '), matched: best.length, brands: entries.length } : null;
   };
 
   // Headline Calculations
@@ -712,7 +718,7 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title={`Statements cover ${c.payoutOrders} of ${c.posOrders} POS orders. Upload the missing brands / outlets / weeks.`}>
                         {(() => {
                           const m = brandMatchFor(c.channel, c.payoutOrders);
-                          return m ? `Partial: 1 of ${m.brands} brands` : `Partial: ${c.payoutOrders}/${c.posOrders} orders`;
+                          return m ? `Partial: ${m.matched} of ${m.brands} brands` : `Partial: ${c.payoutOrders}/${c.posOrders} orders`;
                         })()}
                       </span>
                     ) : (
