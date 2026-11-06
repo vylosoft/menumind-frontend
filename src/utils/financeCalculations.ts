@@ -1,3 +1,4 @@
+import { OutletOperatingExpenseItem } from '../types/operatingCosts';
 import { RawSalesRecord } from '../types/restaurant';
 /**
  * @license
@@ -162,7 +163,8 @@ export function generateMonthlyPnL(
   purchasesList?: PurchaseRecord[],
   inventorySnapshots?: InventorySnapshot[],
   foodCostingBasis: FoodCostingBasis = 'recipe_based',
-  salesRecords: RawSalesRecord[] = []
+  salesRecords: RawSalesRecord[] = [],
+  operatingExpenses: OutletOperatingExpenseItem[] = []
 ): MonthlyPnLStatement {
   const isWhitefield = outlet === 'whitefield';
   const isBanaswadi = outlet === 'banaswadi';
@@ -397,6 +399,36 @@ export function generateMonthlyPnL(
     }
   });
 
+  // Outlet Operating Overheads saved in Supabase (the screen the client maintains) replace the old
+  // expense list when present: each item's Banaswadi / Whitefield amount, summed for Consolidated.
+  const hasOperatingExpenses = (operatingExpenses || []).some(
+    (e) => (Number(e.banaswadiAmount) || 0) + (Number(e.whitefieldAmount) || 0) > 0
+  );
+  if (hasOperatingExpenses) {
+    kitchenRent = 0; staffAccommodation = 0; electricityExpense = 0; lpgGasExpense = 0;
+    tankerAndKitchenWater = 0; sanitationAndCleaning = 0; posAndInternetTech = 0; otherFixedExpenses = 0;
+    operatingExpenses.forEach((e) => {
+      const amt =
+        (isWhitefield ? 0 : Number(e.banaswadiAmount) || 0) + (isBanaswadi ? 0 : Number(e.whitefieldAmount) || 0);
+      if (!amt) return;
+      const name = String(e.name || '').toLowerCase();
+      if (e.categoryGroup === 'Facility & Rent') {
+        if (name.includes('accommodation') || name.includes('quarters') || name.includes('dorm')) staffAccommodation += amt;
+        else kitchenRent += amt;
+      } else if (e.categoryGroup === 'Utilities & Water') {
+        if (name.includes('lpg') || name.includes('gas')) lpgGasExpense += amt;
+        else if (name.includes('water') || name.includes('tanker')) tankerAndKitchenWater += amt;
+        else electricityExpense += amt;
+      } else if (e.categoryGroup === 'Hygiene & Cleaning') {
+        sanitationAndCleaning += amt;
+      } else if (e.categoryGroup === 'Technology & Software') {
+        posAndInternetTech += amt;
+      } else {
+        otherFixedExpenses += amt;
+      }
+    });
+  }
+
   // If authoritative staff directory provided, use it; otherwise fallback to existing payroll array
   if (staffList && staffList.length > 0) {
     const agg = aggregatePayrollForPnL(staffList, month, outlet as any);
@@ -413,7 +445,7 @@ export function generateMonthlyPnL(
   }
 
   // If accommodation was not captured separately in expenses, check Whitefield/Banaswadi baseline
-  if (staffAccommodation === 0) {
+  if (staffAccommodation === 0 && !hasOperatingExpenses) {
     if (isWhitefield) staffAccommodation = 32000;
     else if (isBanaswadi) staffAccommodation = 28000;
     else staffAccommodation = 60000;
