@@ -34,13 +34,25 @@ interface OverviewViewProps {
 }
 
 export const OverviewView: React.FC<OverviewViewProps> = ({
-  parentDishes,
-  totalRevenue,
-  totalQuantity,
+  parentDishes: allParentDishes,
+  totalRevenue: allTotalRevenue,
+  totalQuantity: allTotalQuantity,
   reconciliation,
   onSelectTab,
   onSelectDish,
 }) => {
+  // Inactive brand "House Of Terreti" is left out by default (same rule as the Finance audit)
+  const [excludeHouseOfTerreti, setExcludeHouseOfTerreti] = useState(true);
+  const isTerreti = (d: ParentDish) => /house\s*of\s*terreti/i.test(d.name);
+  const excludedDishes = excludeHouseOfTerreti ? allParentDishes.filter(isTerreti) : [];
+  const parentDishes = excludeHouseOfTerreti ? allParentDishes.filter((d) => !isTerreti(d)) : allParentDishes;
+  const totalRevenue = allTotalRevenue - excludedDishes.reduce((sum, d) => sum + d.totalRevenue, 0);
+  const totalQuantity = allTotalQuantity - excludedDishes.reduce((sum, d) => sum + d.totalQuantity, 0);
+  const shownRows = Math.max(
+    0,
+    reconciliation.validRows - excludedDishes.reduce((sum, d) => sum + (d.variants?.length || 0), 0)
+  );
+
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [chartMetric, setChartMetric] = useState<'revenue' | 'quantity'>('revenue');
@@ -223,7 +235,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </div>
           <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
             <span className="font-semibold text-teal-700">Net Sales</span>
-            <span>from {reconciliation.validRows.toLocaleString()} POS report rows</span>
+            <span>from {shownRows.toLocaleString()} POS report rows</span>
           </div>
         </div>
 
@@ -390,6 +402,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               </option>
             ))}
           </select>
+          <label className="ml-2 flex items-center gap-2 text-xs font-semibold text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-100 whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={excludeHouseOfTerreti}
+              onChange={(e) => setExcludeHouseOfTerreti(e.target.checked)}
+              className="rounded text-teal-600 focus:ring-teal-500 w-4 h-4"
+            />
+            <span>Exclude Inactive &quot;House Of Terreti&quot;</span>
+          </label>
         </div>
 
         <div className="relative w-full sm:w-64">
