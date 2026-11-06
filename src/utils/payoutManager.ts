@@ -522,11 +522,17 @@ export function reconcileHyperpurePurchases(
       (pur.category || '').toLowerCase().includes('hyperpure');
     if (!isSupplierHyperpure) return false;
     if (outletFilter !== 'consolidated' && pur.outletId !== outletFilter) return false;
-    if (pur.month && pur.month !== monthFilter) return false;
+    // Purchases loaded from Supabase may carry accountingMonth / totalAmountINR instead of month / totalAmount
+    const anyPur = pur as any;
+    const purMonth = String(pur.month || anyPur.accountingMonth || pur.purchaseDate || '').slice(0, 7);
+    if (purMonth !== monthFilter) return false;
     return true;
   });
 
-  const totalInvoicedAmount = hyperpurePurchases.reduce((sum, p) => sum + (p.totalAmount || 0), 0);
+  const totalInvoicedAmount = hyperpurePurchases.reduce(
+    (sum, p) => sum + (Number(p.totalAmount ?? (p as any).totalAmountINR) || 0),
+    0
+  );
   const totalInvoicesCount = hyperpurePurchases.length;
 
   const relevantPayouts = payouts.filter((p) => {
