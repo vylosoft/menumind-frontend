@@ -163,7 +163,7 @@ export function normalizeDishName(
     const mainPart = separatorMatch[1].trim();
     const candidateVariant = (separatorMatch[2] || separatorMatch[3] || separatorMatch[4] || '').trim();
 
-    if (candidateVariant) {
+    if (candidateVariant && mainPart) {
       // Check if candidate variant matches known variant keywords
       const lowerCandidate = candidateVariant.toLowerCase();
       const isKnown = KNOWN_VARIANTS.some((kv) => lowerCandidate.includes(kv));
@@ -179,8 +179,11 @@ export function normalizeDishName(
     for (const v of KNOWN_VARIANTS) {
       const regex = new RegExp(`\\b${v}\\b$`, 'i');
       if (regex.test(workingName)) {
+        const stem = workingName.replace(regex, '').trim();
+        // Never strip the whole name (e.g. a POS row literally called "Delivery")
+        if (!stem.replace(/[-–—/:\s]/g, '')) break;
         extractedVariant = workingName.match(regex)![0];
-        workingName = workingName.replace(regex, '').trim();
+        workingName = stem;
         break;
       }
     }
