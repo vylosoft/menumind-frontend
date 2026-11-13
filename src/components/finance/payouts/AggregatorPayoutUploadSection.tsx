@@ -3,15 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { payoutsApi } from '../../../lib/ingestionApi';
-import { ApiError } from '../../../lib/apiClient';
 import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { appUrl } from '../../../lib/appUrl';
+import { payoutsApi } from '../../../lib/ingestionApi';
 import {
   PlatformPayoutRecord,
   HyperpureReconciliationReport,
   ChannelPosMatchReport,
   GrowthAnalysisMetrics,
   ChannelAwareBreakEvenMetrics,
+  AggregatorBrandOutletMapping,
   OutletId,
 } from '../../../types/finance';
 import { RawSalesRecord, ParentDish } from '../../../types/restaurant';
@@ -21,19 +22,26 @@ import { StaffMember } from '../../../types/payrollStaff';
 import { OutletOperatingExpenseItem } from '../../../types/operatingCosts';
 import {
   parseAggregatorPayoutSpreadsheet,
+  checkDuplicatePayoutUpload,
   matchPosWithPayouts,
   reconcileHyperpurePurchases,
   calculateGrowthMetrics,
   calculateChannelAwareBreakEven,
 } from '../../../utils/payoutManager';
+import {
+  getSavedAggregatorMappings,
+  saveAggregatorMappings,
+  resetAggregatorMappingsToDefault,
+  mergeWithDefaultMappings,
+} from '../../../utils/aggregatorMappingManager';
 import { formatINR } from '../../../utils/financeCalculations';
+import { PayoutReviewModal } from './PayoutReviewModal';
+import { AggregatorMappingTableCard } from './AggregatorMappingTableCard';
 import {
   Upload,
   FileSpreadsheet,
   CheckCircle2,
   AlertTriangle,
-  Info,
-  DollarSign,
   TrendingUp,
   Scale,
   ShoppingBag,
@@ -42,12 +50,12 @@ import {
   Database,
   ArrowRight,
   Sparkles,
-  Layers,
   ArrowUpRight,
   ArrowDownRight,
-  Building2,
   Calendar,
   Check,
+  Edit2,
+  X,
 } from 'lucide-react';
 
 interface AggregatorPayoutUploadSectionProps {
@@ -89,6 +97,33 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedOutlet, setSelectedOutlet] = useState<OutletId>('consolidated');
+
+  // Aggregator Restaurant ID -> Brand & Outlet Mapping Table state
+  const [mappings, setMappings] = useState<AggregatorBrandOutletMapping[]>(() =>
+    getSavedAggregatorMappings()
+  );
+  const [mappingSyncStatus, setMappingSyncStatus] = useState<
+    'idle' | 'syncing' | 'synced' | 'local_only'
+  >('idle');
+
+  // Editable Payout Review Pop-up Modal state
+  const [reviewModalState, setReviewModalState] = useState<{
+    isOpen: boolean;
+    mode: 'create' | 'edit';
+    records: PlatformPayoutRecord[];
+    saving: boolean;
+    error: string | null;
+  }>({
+    isOpen: false,
+    mode: 'create',
+    records: [],
+    saving: false,
+    error: null,
+  });
+
+  // Inline 2-click delete confirmation (no window.confirm)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
   // Months that actually have data (statements or POS sales), newest first
   const availableMonths = useMemo(() => {
     const set = new Set<string>();
@@ -100,27 +135,62 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     }
     return Array.from(set).sort().reverse();
   }, [payouts, rawRecords]);
+
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   useEffect(() => {
-    if (!selectedMonth || !availableMonths.includes(selectedMonth)) setSelectedMonth(availableMonths[0]);
+    if (!selectedMonth || !availableMonths.includes(selectedMonth)) {
+      setSelectedMonth(availableMonths[0]);
+    }
   }, [availableMonths, selectedMonth]);
+
   const monthLabel = (m: string, style: 'long' | 'short' = 'long') => {
     if (!m) return '';
     const [y, mo] = m.split('-').map(Number);
-    return new Date(y, mo - 1, 1).toLocaleString('en-IN', style === 'long' ? { month: 'long', year: 'numeric' } : { month: 'short', year: '2-digit' });
+    return new Date(y, mo - 1, 1).toLocaleString(
+      'en-IN',
+      style === 'long' ? { month: 'long', year: 'numeric' } : { month: 'short', year: '2-digit' }
+    );
   };
+
   const shiftMonth = (m: string, delta: number) => {
     if (!m) return '';
     const [y, mo] = m.split('-').map(Number);
     const d = new Date(y, mo - 1 + delta, 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   };
+
   const [selectedPlatform, setSelectedPlatform] = useState<'auto' | 'swiggy' | 'zomato' | 'ownly'>('auto');
   const [selectedPeriodType, setSelectedPeriodType] = useState<'monthly' | 'weekly'>('monthly');
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccessMessage, setUploadSuccessMessage] = useState<string | null>(null);
   const [channelShiftSim, setChannelShiftSim] = useState<number>(15);
+
+  // Persist mappings to localStorage + Supabase
+  const handleSaveMappings = async (updated: AggregatorBrandOutletMapping[]) => {
+    setMappings(updated);
+    saveAggregatorMappings(updated);
+    setMappingSyncStatus('syncing');
+    try {
+      const res = await fetch(appUrl('/api/supabase/aggregator-mappings'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mappings: updated }),
+      });
+      if (res.ok) {
+        setMappingSyncStatus('synced');
+      } else {
+        setMappingSyncStatus('local_only');
+      }
+    } catch {
+      setMappingSyncStatus('local_only');
+    }
+  };
+
+  const handleResetMappings = () => {
+    const defaults = resetAggregatorMappingsToDefault();
+    void handleSaveMappings(defaults);
+  };
 
   // Filter payouts based on selected outlet
   const relevantPayouts = useMemo(() => {
@@ -130,19 +200,20 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     });
   }, [payouts, selectedOutlet]);
 
-  // 1. Channel POS Matching Report: computed by the API from stored POS sales + payout statements for the month.
+  // 1. Channel POS vs Aggregator Payout Reconciliation Matrix:
+  // Computed deterministically from POS sales (including undated Sub-Order / Item-Wise exports) + confirmed payouts.
   const localMatchReport: ChannelPosMatchReport = useMemo(() => {
     return matchPosWithPayouts(
-      rawRecords.filter((r) => !selectedMonth || (r.date || '').startsWith(selectedMonth)),
-      relevantPayouts.filter((p) => !selectedMonth || p.month === selectedMonth),
-      selectedOutlet
+      rawRecords,
+      relevantPayouts,
+      selectedOutlet,
+      selectedMonth
     );
   }, [rawRecords, relevantPayouts, selectedOutlet, selectedMonth]);
+
   const [serverMatchReport, setServerMatchReport] = useState<ChannelPosMatchReport | null>(null);
-  const [matchSource, setMatchSource] = useState<string>('');
   const [matchRefreshKey, setMatchRefreshKey] = useState(0);
   const [matchLoading, setMatchLoading] = useState(false);
-  // Reports already fetched for a month/outlet are reused; cleared whenever statements change.
   const matchCacheRef = useRef<Map<string, any>>(new Map());
 
   useEffect(() => {
@@ -150,13 +221,15 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
   }, [payouts, matchRefreshKey]);
 
   useEffect(() => {
-    if (!selectedMonth) return;
+    if (!selectedMonth || rawRecords.length > 0 || relevantPayouts.length > 0) {
+      setServerMatchReport(null);
+      return;
+    }
     let cancelled = false;
     const key = `${selectedMonth}|${selectedOutlet}`;
     const cached = matchCacheRef.current.get(key);
     if (cached) {
       setServerMatchReport(cached);
-      setMatchSource(cached.posSource || '');
       return;
     }
     setMatchLoading(true);
@@ -165,14 +238,12 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
       .then((report: any) => {
         matchCacheRef.current.set(key, report);
         if (cancelled) return;
-        setServerMatchReport(report);
-        setMatchSource(report.posSource || '');
+        if (report && (report.totalPosGross > 0 || report.totalPayoutGross > 0)) {
+          setServerMatchReport(report);
+        }
       })
       .catch(() => {
-        if (!cancelled) {
-          setServerMatchReport(null);
-          setMatchSource('');
-        }
+        if (!cancelled) setServerMatchReport(null);
       })
       .finally(() => {
         if (!cancelled) setMatchLoading(false);
@@ -180,9 +251,14 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     return () => {
       cancelled = true;
     };
-  }, [selectedMonth, selectedOutlet, payouts, matchRefreshKey]);
+  }, [selectedMonth, selectedOutlet, payouts, rawRecords.length, relevantPayouts.length, matchRefreshKey]);
 
-  const channelMatchReport: ChannelPosMatchReport = serverMatchReport || localMatchReport;
+  const channelMatchReport: ChannelPosMatchReport = useMemo(() => {
+    if (rawRecords.length > 0 || relevantPayouts.length > 0) {
+      return localMatchReport;
+    }
+    return serverMatchReport || localMatchReport;
+  }, [rawRecords.length, relevantPayouts.length, localMatchReport, serverMatchReport]);
 
   // 2. Hyperpure Supplier Offset Audit
   const hyperpureReport: HyperpureReconciliationReport = useMemo(() => {
@@ -211,45 +287,24 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     });
   }, [staffDirectory, operatingExpenses, payouts, selectedOutlet, selectedMonth, channelMatchReport, purchases]);
 
-  // Statement coverage per channel: a channel can only be reconciled against statements that were uploaded.
-  const noStatement = (c: { channel: string; payoutGrossSales: number }) =>
-    c.channel !== 'direct' && !(c.payoutGrossSales > 0);
-  const partialStatement = (c: { channel: string; payoutGrossSales: number; payoutOrders: number; posOrders: number }) =>
-    !noStatement(c) && c.channel !== 'direct' && c.posOrders > 0 && c.payoutOrders < c.posOrders * 0.9;
+  // Statement coverage helpers for the Reconciliation Matrix
+  const noStatement = (c: { channel: string; payoutGrossSales: number; payoutOrders: number }) =>
+    c.channel !== 'direct' && !(c.payoutGrossSales > 0) && !(c.payoutOrders > 0);
   const noPos = (c: { channel: string; posOrders: number; posGrossSales: number }) =>
     c.channel !== 'direct' && !(c.posOrders > 0) && !(c.posGrossSales > 0);
-  const coveredRows = channelMatchReport.channelReports.filter((c) => !noStatement(c) && !noPos(c) && !partialStatement(c));
-  const coveredVariance = coveredRows.reduce((s, c) => s + c.varianceGross, 0);
-  const rowsNetCredited = channelMatchReport.channelReports.reduce((s, c) => s + c.payoutNetCredited, 0);
-  const anyIncomplete = channelMatchReport.channelReports.some((c) => noStatement(c) || partialStatement(c) || noPos(c));
 
-  // Which brand a channel's statements belong to: the POS brand row with exactly the same order count
-  const brandMatchFor = (channel: string, payoutOrders: number) => {
-    if (channel === 'direct' || !(payoutOrders > 0)) return null;
-    const groups: Record<string, number> = {};
-    rawRecords
-      .filter((r) => !selectedMonth || (r.date || '').startsWith(selectedMonth))
-      .filter((r) => selectedOutlet === 'consolidated' || String(r.outlet || '').toLowerCase() === selectedOutlet)
-      .filter((r) => `${r.salesChannel || ''} ${r.rawItemName || ''}`.toLowerCase().includes(channel))
-      .forEach((r) => {
-        const brand = String(r.rawItemName || '')
-          .replace(/\s*[-–]\s*(swiggy|zomato|ownly)\s*$/i, '')
-          .replace(/\s*-?\s*w\s*$/i, ' (Whitefield)')
-          .trim();
-        const label = /\(Whitefield\)$/.test(brand) || String(r.outlet || '').toLowerCase() === 'whitefield'
-          ? brand.replace(/ \(Whitefield\)$/, '') + ' · Whitefield'
-          : brand + ' · Banaswadi';
-        groups[label] = (groups[label] || 0) + (Number(r.quantity) || 0);
-      });
-    // Smallest set of brands whose POS orders add up exactly to the statement orders
-    const entries = Object.entries(groups).map(([b, q]) => [b, Math.round(q)] as [string, number]);
-    let best: string[] | null = null;
-    for (let mask = 1; mask < 1 << entries.length; mask++) {
-      const pick = entries.filter((_, i) => mask & (1 << i));
-      if (pick.reduce((t, [, q]) => t + q, 0) === payoutOrders && (!best || pick.length < best.length)) best = pick.map(([b]) => b);
-    }
-    return best ? { brand: best.join(' + '), matched: best.length, brands: entries.length } : null;
-  };
+  const reconciledAggregatorRows = channelMatchReport.channelReports.filter(
+    (c) => c.channel !== 'direct' && !noStatement(c) && !noPos(c)
+  );
+  const coveredVariance = reconciledAggregatorRows.reduce((s, c) => s + c.varianceGross, 0);
+  const rowsNetCredited = channelMatchReport.channelReports.reduce((s, c) => s + c.payoutNetCredited, 0);
+  const rowsTotalDeductions = channelMatchReport.channelReports.reduce(
+    (s, c) => s + (c.payoutTotalDeductions || 0),
+    0
+  );
+  const hasMissingStatementsWherePosExists = channelMatchReport.channelReports.some(
+    (c) => c.channel !== 'direct' && c.posGrossSales > 0 && noStatement(c)
+  );
 
   // Headline Calculations
   const totalDirectSales = useMemo(() => {
@@ -266,61 +321,59 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     return channelMatchReport.totalPayoutNetCredited + totalDirectSales;
   }, [channelMatchReport, totalDirectSales]);
 
-  // Handle File Upload: the API parses the statement, stores it and returns the saved payout statements.
-  const uploadPayoutFile = async (file: File, overrides: { month?: string; replace?: boolean } = {}) => {
-    const result = await payoutsApi.upload({
-      files: [file],
-      platform: selectedPlatform !== 'auto' ? selectedPlatform : undefined,
-      outletId: selectedOutlet !== 'consolidated' ? selectedOutlet : undefined,
-      periodType: selectedPeriodType,
-      month: overrides.month,
-      replace: overrides.replace,
-    });
-
-    // The database decides what is stored (replaced / added to the month); show exactly that.
-    onUpdatePayouts(await payoutsApi.fetchAll());
-    setMatchRefreshKey((k) => k + 1);
-
-    const fileInfo = result.files[0];
-    const warnings = result.files.flatMap((f) => f.warnings);
-    setUploadSuccessMessage(
-      `Saved ${result.summary.recordCount} ${fileInfo.platform.toUpperCase()} payout statement(s) from "${file.name}" ` +
-        `(${fileInfo.insertedRows} row(s)). Gross ₹${result.summary.totalGrossSales.toLocaleString('en-IN')}, ` +
-        `net ₹${result.summary.totalNetPayout.toLocaleString('en-IN')}.` +
-        (warnings.length ? ` Note: ${warnings.join(' ')}` : '')
-    );
-  };
-
+  // Step 1 on File Upload: Parse Excel/CSV -> Reject Duplicates -> Open Editable Segregation Pop-up Screen
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files: File[] = event.target.files ? Array.from(event.target.files) : [];
+    if (files.length === 0) return;
 
     setUploadLoading(true);
     setUploadError(null);
     setUploadSuccessMessage(null);
 
-    const overrides: { month?: string; replace?: boolean } = {};
     try {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          await uploadPayoutFile(file, overrides);
-          break;
-        } catch (err: any) {
-          if (err instanceof ApiError && err.status === 409 && !overrides.replace &&
-              window.confirm(`${err.message}\n\nOK = replace the stored statement with "${file.name}".\nCancel = keep the stored data and add nothing.`)) {
-            overrides.replace = true;
-            continue;
-          }
-          if (err instanceof ApiError && err.status === 422 && /month could not be determined/i.test(err.message) && !overrides.month &&
-              window.confirm(`The statement month could not be detected from "${file.name}". Use ${selectedMonth}?`)) {
-            overrides.month = selectedMonth;
-            continue;
-          }
-          throw err;
+      const parsedDrafts: PlatformPayoutRecord[] = [];
+      const duplicateErrors: string[] = [];
+
+      for (const file of files) {
+        const parsed = await parseAggregatorPayoutSpreadsheet(file, mappings, {
+          preferredPlatform: selectedPlatform,
+          preferredPeriodType: selectedPeriodType,
+          fallbackMonth: selectedMonth,
+        });
+
+        // Intelligent Duplicate File & Semantic Data Rejection
+        const dupCheck = checkDuplicatePayoutUpload(
+          {
+            fileHash: parsed.fileHash,
+            fileName: file.name,
+            payouts: parsed.payouts,
+          },
+          [...payouts, ...parsedDrafts]
+        );
+
+        if (dupCheck.isDuplicate) {
+          duplicateErrors.push(dupCheck.reason || `Duplicate file rejected: "${file.name}".`);
+          continue;
         }
+
+        parsedDrafts.push(...parsed.payouts);
+      }
+
+      if (duplicateErrors.length > 0) {
+        setUploadError(duplicateErrors.join(' | '));
+      }
+
+      if (parsedDrafts.length > 0) {
+        setReviewModalState({
+          isOpen: true,
+          mode: 'create',
+          records: parsedDrafts,
+          saving: false,
+          error: null,
+        });
       }
     } catch (err: any) {
-      setUploadError(err?.message || 'Failed to upload the payout file.');
+      setUploadError(err?.message || 'Failed to parse payout spreadsheet. Please verify the file format.');
     } finally {
       setUploadLoading(false);
       if (fileInputRef.current) {
@@ -329,33 +382,170 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     }
   };
 
-  const handleDeletePayout = async (id: string) => {
-    const target = payouts.find((p) => p.id === id) as PlatformPayoutRecord | undefined;
-    if (!target) return;
+  // Step 2 on Modal Confirmation: Persist confirmed payout breakdown & mappings to Supabase + State
+  const handleConfirmPayoutModal = async (
+    confirmedRecords: PlatformPayoutRecord[],
+    mappingsToUpsert: AggregatorBrandOutletMapping[]
+  ) => {
+    setReviewModalState((prev) => ({ ...prev, saving: true, error: null }));
 
-    if (!target.batchId) {
-      onUpdatePayouts(payouts.filter((p) => p.id !== id));
-      return;
+    let activeMappings = mappings;
+    if (mappingsToUpsert.length > 0) {
+      activeMappings = mergeWithDefaultMappings([...mappings, ...mappingsToUpsert]);
+      setMappings(activeMappings);
+      saveAggregatorMappings(activeMappings);
     }
 
-    const siblings = payouts.filter((p) => p.batchId === target.batchId);
-    const msg =
-      siblings.length > 1
-        ? `Delete "${target.sourceFileName}" and its ${siblings.length} payout statements from the database?`
-        : `Delete "${target.sourceFileName || 'this payout'}" from the database?`;
-    if (!window.confirm(msg)) return;
+    try {
+      const response = await fetch(appUrl('/api/supabase/payouts/save'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payouts: confirmedRecords,
+          mappings: mappingsToUpsert.length > 0 ? activeMappings : undefined,
+          mode: reviewModalState.mode,
+        }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+
+      // Strict duplicate rejection from Supabase DB
+      if (response.status === 409) {
+        const msg = result.error || 'Duplicate payout file/data rejected by Supabase.';
+        setReviewModalState((prev) => ({ ...prev, saving: false, error: msg }));
+        setUploadError(msg);
+        return;
+      }
+
+      if (response.ok && result.success && Array.isArray(result.allPayouts)) {
+        // Merge DB payouts with any local-only payouts cleanly
+        const byId = new Map<string, PlatformPayoutRecord>();
+        for (const p of result.allPayouts) {
+          byId.set(p.id, p);
+        }
+        for (const p of confirmedRecords) {
+          byId.set(p.id, p);
+        }
+        const mergedList = Array.from(byId.values());
+        onUpdatePayouts(mergedList);
+        if (confirmedRecords[0]?.month) {
+          setSelectedMonth(confirmedRecords[0].month);
+        }
+        setMatchRefreshKey((k) => k + 1);
+        setReviewModalState({
+          isOpen: false,
+          mode: 'create',
+          records: [],
+          saving: false,
+          error: null,
+        });
+        const totalGross = confirmedRecords.reduce((s, r) => s + r.grossSales, 0);
+        const totalNet = confirmedRecords.reduce((s, r) => s + r.actualBankSettlement, 0);
+        setUploadError(null);
+        setUploadSuccessMessage(
+          `Confirmed & persisted ${confirmedRecords.length} payout statement(s) to Supabase! ` +
+            `Gross ${formatINR(totalGross)} → Net Payout ${formatINR(totalNet)}. Reconciliation Matrix updated.`
+        );
+        return;
+      }
+
+      // If Supabase credentials are not active in local preview, update state + localStorage cleanly and notify user
+      const updatedMap = new Map<string, PlatformPayoutRecord>();
+      payouts.forEach((p) => updatedMap.set(p.id, p));
+      confirmedRecords.forEach((p) => updatedMap.set(p.id, p));
+      const nextPayouts = Array.from(updatedMap.values());
+      onUpdatePayouts(nextPayouts);
+      if (confirmedRecords[0]?.month) {
+        setSelectedMonth(confirmedRecords[0].month);
+      }
+      setMatchRefreshKey((k) => k + 1);
+      setReviewModalState({
+        isOpen: false,
+        mode: 'create',
+        records: [],
+        saving: false,
+        error: null,
+      });
+      setUploadSuccessMessage(
+        `Confirmed ${confirmedRecords.length} payout statement(s) & updated POS Reconciliation Matrix ` +
+          `(saved locally; connect Supabase DB password in Cloud Sync to push to PostgreSQL: ${result.error || 'DB offline'}).`
+      );
+    } catch (err: any) {
+      const updatedMap = new Map<string, PlatformPayoutRecord>();
+      payouts.forEach((p) => updatedMap.set(p.id, p));
+      confirmedRecords.forEach((p) => updatedMap.set(p.id, p));
+      onUpdatePayouts(Array.from(updatedMap.values()));
+      if (confirmedRecords[0]?.month) {
+        setSelectedMonth(confirmedRecords[0].month);
+      }
+      setReviewModalState({
+        isOpen: false,
+        mode: 'create',
+        records: [],
+        saving: false,
+        error: null,
+      });
+      setUploadSuccessMessage(
+        `Confirmed ${confirmedRecords.length} statement(s) & updated Reconciliation Matrix locally.`
+      );
+    }
+  };
+
+  const handleOpenEditModal = (record: PlatformPayoutRecord) => {
+    setReviewModalState({
+      isOpen: true,
+      mode: 'edit',
+      records: [record],
+      saving: false,
+      error: null,
+    });
+  };
+
+  const handleExecuteDelete = async (id: string) => {
+    const target = payouts.find((p) => p.id === id);
+    setPendingDeleteId(null);
+    if (!target) return;
+
+    const remaining = payouts.filter((p) => p.id !== id);
+    onUpdatePayouts(remaining);
 
     try {
-      await payoutsApi.deleteBatch(target.batchId);
-      onUpdatePayouts(await payoutsApi.fetchAll());
-      setUploadSuccessMessage(`Deleted "${target.sourceFileName}".`);
-    } catch (err: any) {
-      setUploadError(err?.message || 'Failed to delete payout statement.');
+      await fetch(appUrl(`/api/supabase/payouts/${encodeURIComponent(id)}`), {
+        method: 'DELETE',
+      });
+      if (target.batchId) {
+        await payoutsApi.deleteBatch(target.batchId).catch(() => {});
+      }
+      setUploadSuccessMessage(
+        `Removed statement "${target.sourceFileName || target.accountName || target.platform.toUpperCase()}".`
+      );
+    } catch {
+      setUploadSuccessMessage(`Removed statement from local registry.`);
     }
   };
 
   return (
     <div className="space-y-6">
+      {/* Editable Payout Segregation Pop-up Modal */}
+      <PayoutReviewModal
+        isOpen={reviewModalState.isOpen}
+        mode={reviewModalState.mode}
+        initialRecords={reviewModalState.records}
+        mappings={mappings}
+        isSaving={reviewModalState.saving}
+        saveError={reviewModalState.error}
+        onCancel={() =>
+          setReviewModalState({
+            isOpen: false,
+            mode: 'create',
+            records: [],
+            saving: false,
+            error: null,
+          })
+        }
+        onConfirm={handleConfirmPayoutModal}
+      />
+
       {/* Filters & Outlet Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4.5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-2">
@@ -413,26 +603,26 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
         <div className="bg-white rounded-2xl p-4.5 border border-slate-200/80 shadow-xs">
           <div className="flex items-center justify-between text-slate-500 text-xs font-medium">
             <span>POS vs Payout Match</span>
-            {anyIncomplete ? (
+            {hasMissingStatementsWherePosExists ? (
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                Statements Incomplete
+                Awaiting Channel Statements
               </span>
             ) : (
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                channelMatchReport.overallStatus === 'matched'
-                  ? 'bg-emerald-100 text-emerald-800'
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  channelMatchReport.overallStatus === 'matched'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : channelMatchReport.overallStatus === 'minor_variance'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-rose-100 text-rose-800'
+                }`}
+              >
+                {channelMatchReport.overallStatus === 'matched'
+                  ? 'Reconciled'
                   : channelMatchReport.overallStatus === 'minor_variance'
-                  ? 'bg-amber-100 text-amber-800'
-                  : 'bg-rose-100 text-rose-800'
-              }`}
-            >
-              {channelMatchReport.overallStatus === 'matched'
-                ? 'Reconciled'
-                : channelMatchReport.overallStatus === 'minor_variance'
-                ? 'Minor Variance'
-                : 'Review Discrepancy'}
-            </span>
+                  ? 'Minor Variance'
+                  : 'Review Discrepancy'}
+              </span>
             )}
           </div>
           <div className="mt-2 text-2xl font-black text-slate-900 tracking-tight">
@@ -440,16 +630,16 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
           </div>
           <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
             <span>
-              POS Gross:{' '}
+              POS Aggregator Gross:{' '}
               {formatINR(
-                (channelMatchReport as any).aggregatorPosGross ??
+                channelMatchReport.aggregatorPosGross ??
                   channelMatchReport.channelReports
                     .filter((c) => c.channel !== 'direct')
                     .reduce((s, c) => s + c.posGrossSales, 0)
               )}
             </span>
             <span className="font-semibold text-slate-700">
-              {anyIncomplete ? `Covered diff: ${formatINR(Math.abs(coveredVariance))}` : `Diff: ${formatINR(Math.abs(channelMatchReport.overallVariance))}`}
+              Diff: {formatINR(Math.abs(reconciledAggregatorRows.length > 0 ? coveredVariance : channelMatchReport.overallVariance))}
             </span>
           </div>
         </div>
@@ -524,22 +714,46 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
 
       {/* Upload Zone Card */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-2 max-w-xl">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
               <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              Automated Spreadsheet Ingestion Engine
+              Interactive Segregation &amp; Duplicate Guard
             </span>
             <h3 className="text-xl font-black text-white tracking-tight">
               Upload Swiggy, Zomato, or Ownly Payout Statements
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Upload weekly or monthly settlement sheets (`.xlsx`, `.xls`, `.csv`). The engine extracts gross orders,
-              commissions, GST, TCS/TDS, and separates Hyperpure ingredient offsets to reconcile directly against Petpooja POS revenue.
+              Upload weekly or monthly settlement sheets (`.xlsx`, `.xls`, `.csv`).{' '}
+              <strong className="text-amber-300">Swiggy</strong> statements evaluate the{' '}
+              <strong className="text-white">&ldquo;Payout Breakup&rdquo;</strong> template combining{' '}
+              <strong className="text-amber-200">Swiggy Orders + Toing Orders</strong> as{' '}
+              <strong>Swiggy</strong>. <strong className="text-rose-300">Zomato</strong> statements evaluate{' '}
+              <code className="text-indigo-200">Sections A → J · Rows 1–32</code>.{' '}
+              <strong className="text-indigo-300">Ownly</strong> statements evaluate the{' '}
+              <strong className="text-white">12-column Settlement Ledger</strong> (
+              <code className="text-emerald-200">RN421127 / RN421125 · Gross · Tax/TDS/TCS · Net Payout · UTR</code>).
+              Duplicate files, UTRs &amp; identical statement data are automatically rejected before saving to Supabase.
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-semibold text-slate-300">Platform:</label>
+              <select
+                value={selectedPlatform}
+                onChange={(e) =>
+                  setSelectedPlatform(e.target.value as 'auto' | 'swiggy' | 'zomato' | 'ownly')
+                }
+                className="bg-slate-800/90 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-hidden focus:ring-1 focus:ring-indigo-400"
+              >
+                <option value="auto">Auto-Detect (by ID / File)</option>
+                <option value="swiggy">Swiggy (incl. Toing)</option>
+                <option value="zomato">Zomato</option>
+                <option value="ownly">Ownly</option>
+              </select>
+            </div>
+
             <div className="flex flex-col gap-1.5">
               <label className="text-[11px] font-semibold text-slate-300">Period Frequency:</label>
               <div className="flex bg-slate-800/80 p-1 rounded-xl border border-slate-700 text-xs">
@@ -547,7 +761,9 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                   type="button"
                   onClick={() => setSelectedPeriodType('monthly')}
                   className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                    selectedPeriodType === 'monthly' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                    selectedPeriodType === 'monthly'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   Monthly Payout
@@ -556,7 +772,9 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                   type="button"
                   onClick={() => setSelectedPeriodType('weekly')}
                   className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                    selectedPeriodType === 'weekly' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                    selectedPeriodType === 'weekly'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   Weekly Payout
@@ -564,10 +782,11 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
               </div>
             </div>
 
-            <div className="sm:self-end">
+            <div>
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 accept=".xlsx,.xls,.csv"
                 onChange={handleFileUpload}
                 className="hidden"
@@ -577,17 +796,17 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploadLoading}
-                className="w-full sm:w-auto px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-xs shadow-lg hover:from-emerald-600 hover:to-teal-600 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-xs shadow-lg hover:from-emerald-600 hover:to-teal-600 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
               >
                 {uploadLoading ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Parsing Statement...</span>
+                    <span>Extracting Breakup...</span>
                   </>
                 ) : (
                   <>
                     <Upload className="w-4 h-4" />
-                    <span>Choose Statement File</span>
+                    <span>Upload Statement(s)</span>
                   </>
                 )}
               </button>
@@ -596,19 +815,45 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
         </div>
 
         {uploadError && (
-          <div className="mt-4 p-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-xs text-rose-200 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-            <span>{uploadError}</span>
+          <div className="mt-4 p-3.5 rounded-xl bg-rose-500/20 border border-rose-500/40 text-xs text-rose-100 flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <span>{uploadError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUploadError(null)}
+              className="text-rose-300 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
 
         {uploadSuccessMessage && (
-          <div className="mt-4 p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-xs text-emerald-200 flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>{uploadSuccessMessage}</span>
+          <div className="mt-4 p-3.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-xs text-emerald-100 flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>{uploadSuccessMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUploadSuccessMessage(null)}
+              className="text-emerald-300 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
       </div>
+
+      {/* Aggregator Restaurant ID -> Brand & Outlet Location Mapping Table */}
+      <AggregatorMappingTableCard
+        mappings={mappings}
+        onSaveMappings={handleSaveMappings}
+        onResetDefaults={handleResetMappings}
+        syncStatus={mappingSyncStatus}
+      />
 
       {/* Channel-by-Channel POS Revenue Matching Table */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -619,11 +864,12 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
               Petpooja POS vs Aggregator Payout Reconciliation Matrix
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Side-by-side comparison of Gross Orders recorded at the counter vs Net Settlement Credited to the Bank Account.
+              Side-by-side comparison of Gross Revenue recorded in Petpooja POS vs Confirmed Aggregator Payout Statements
+              across Banaswadi &amp; Whitefield ({selectedOutlet === 'consolidated' ? 'Consolidated' : `${selectedOutlet} Outlet`}).
             </p>
           </div>
           <span className="text-[11px] font-semibold text-slate-500">
-            {channelMatchReport.channelReports.length} channels analyzed
+            {selectedMonth ? monthLabel(selectedMonth) : 'All Months'} · {channelMatchReport.channelReports.length} channels
           </span>
         </div>
 
@@ -631,121 +877,172 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
           <table className="w-full text-xs text-left">
             <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
               <tr>
-                <th className="py-3 px-4">Channel</th>
+                <th className="py-3 px-4">Channel &amp; Mapped Accounts</th>
                 <th className="py-3 px-3 text-right">POS Gross Sales</th>
                 <th className="py-3 px-3 text-right">POS Orders</th>
                 <th className="py-3 px-3 text-right">Payout Gross</th>
                 <th className="py-3 px-3 text-right">Payout Orders</th>
+                <th className="py-3 px-3 text-right">Total Deductions</th>
                 <th className="py-3 px-3 text-right">Net Credited Bank</th>
                 <th className="py-3 px-3 text-right">Variance (₹)</th>
                 <th className="py-3 px-4 text-center">Reconciliation Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {channelMatchReport.channelReports.map((c) => (
-                <tr key={c.channel} className="hover:bg-slate-50/70 transition-colors">
-                  <td className="py-3.5 px-4 font-bold text-slate-900 flex items-center gap-2">
-                    <span
-                      className={`w-2.5 h-2.5 rounded-full ${
-                        c.channel === 'swiggy'
-                          ? 'bg-amber-500'
-                          : c.channel === 'zomato'
-                          ? 'bg-rose-500'
-                          : c.channel === 'ownly'
-                          ? 'bg-indigo-500'
-                          : 'bg-emerald-500'
-                      }`}
-                    />
-                    <span>
-                      {c.channelLabel}
-                      {(() => {
-                        const m = brandMatchFor(c.channel, c.payoutOrders);
-                        return m ? (
-                          <span className="block text-[10px] font-medium text-emerald-700">
-                            Statement = {m.brand} ({c.payoutOrders}/{c.payoutOrders} orders matched)
+              {channelMatchReport.channelReports.map((c) => {
+                const missingStmt = noStatement(c);
+                const missingPos = noPos(c);
+                return (
+                  <tr key={c.channel} className="hover:bg-slate-50/70 transition-colors align-top">
+                    <td className="py-3.5 px-4 font-bold text-slate-900">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                            c.channel === 'swiggy'
+                              ? 'bg-amber-500'
+                              : c.channel === 'zomato'
+                              ? 'bg-rose-500'
+                              : c.channel === 'ownly'
+                              ? 'bg-indigo-500'
+                              : 'bg-emerald-500'
+                          }`}
+                        />
+                        <span>{c.channelLabel}</span>
+                      </div>
+
+                      {/* Segregated Brand + Outlet + Restaurant ID pills */}
+                      {c.statementBreakdown && c.statementBreakdown.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1 pl-4">
+                          {c.statementBreakdown.map((sb) => (
+                            <span
+                              key={sb.id}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+                                sb.outletId === 'whitefield'
+                                  ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                                  : 'bg-teal-50 text-teal-800 border-teal-200'
+                              }`}
+                            >
+                              <span>{sb.brandName}</span>
+                              <span>·</span>
+                              <span className="capitalize">{sb.outletId}</span>
+                              {sb.restaurantId && (
+                                <span className="font-mono text-[9px] opacity-80">
+                                  [{sb.restaurantId}]
+                                </span>
+                              )}
+                              <span className="font-mono font-bold">
+                                {formatINR(sb.grossSales)}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+
+                    <td className="py-3.5 px-3 text-right font-mono text-slate-800">
+                      {formatINR(c.posGrossSales)}
+                    </td>
+
+                    <td className="py-3.5 px-3 text-right text-slate-600">
+                      {c.posOrders.toLocaleString('en-IN')}
+                    </td>
+
+                    <td className="py-3.5 px-3 text-right font-mono font-semibold text-slate-900">
+                      {c.channel === 'direct'
+                        ? `${formatINR(c.payoutGrossSales)} (Direct)`
+                        : !missingStmt
+                        ? formatINR(c.payoutGrossSales)
+                        : 'No statement'}
+                    </td>
+
+                    <td className="py-3.5 px-3 text-right text-slate-600">
+                      {c.payoutOrders.toLocaleString('en-IN')}
+                    </td>
+
+                    <td className="py-3.5 px-3 text-right font-mono text-rose-700">
+                      {c.channel === 'direct' || missingStmt ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        `-${formatINR(c.payoutTotalDeductions || 0)}`
+                      )}
+                    </td>
+
+                    <td className="py-3.5 px-3 text-right font-mono font-bold text-emerald-700">
+                      {missingStmt ? (
+                        <span className="text-slate-400 font-normal">—</span>
+                      ) : (
+                        formatINR(c.payoutNetCredited)
+                      )}
+                    </td>
+
+                    <td className="py-3.5 px-3 text-right font-mono font-semibold">
+                      {missingStmt || missingPos ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        <div>
+                          <span
+                            className={
+                              Math.abs(c.varianceGross) <= 500
+                                ? 'text-emerald-700'
+                                : Math.abs(c.varianceGross) <= 5000
+                                ? 'text-amber-700'
+                                : 'text-rose-700'
+                            }
+                          >
+                            {c.varianceGross >= 0 ? '+' : ''}
+                            {formatINR(c.varianceGross)}
                           </span>
-                        ) : null;
-                      })()}
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-3 text-right font-mono text-slate-800">
-                    {formatINR(c.posGrossSales)}
-                  </td>
-                  <td className="py-3.5 px-3 text-right text-slate-600">
-                    {c.posOrders.toLocaleString()}
-                  </td>
-                  <td className="py-3.5 px-3 text-right font-mono font-semibold text-slate-900">
-                    {c.channel === 'direct'
-                      ? `${formatINR(c.payoutGrossSales)} (POS)`
-                      : c.payoutGrossSales > 0
-                      ? formatINR(c.payoutGrossSales)
-                      : 'No statement'}
-                  </td>
-                  <td className="py-3.5 px-3 text-right text-slate-600">
-                    {c.payoutOrders.toLocaleString()}
-                  </td>
-                  <td className="py-3.5 px-3 text-right font-mono font-bold text-emerald-700">
-                    {noStatement(c) ? <span className="text-slate-400 font-normal">—</span> : formatINR(c.payoutNetCredited)}
-                  </td>
-                  <td className="py-3.5 px-3 text-right font-mono font-semibold">
-                    {noStatement(c) || noPos(c) ? (
-                      <span className="text-slate-400">—</span>
-                    ) : partialStatement(c) ? (
-                      <span className="text-slate-400" title="Shown once every brand's statement for this channel is uploaded">
-                        — <span className="block text-[10px] font-normal">orders: {c.payoutOrders}/{c.payoutOrders} matched</span>
-                      </span>
-                    ) : (
-                    <span
-                      className={
-                        Math.abs(c.varianceGross) <= 500
-                          ? 'text-emerald-700'
-                          : Math.abs(c.varianceGross) <= 5000
-                          ? 'text-amber-700'
-                          : 'text-rose-700'
-                      }
-                    >
-                      {c.varianceGross >= 0 ? '+' : ''}
-                      {formatINR(c.varianceGross)}
-                    </span>
-                    )}
-                  </td>
-                  <td className="py-3.5 px-4 text-center">
-                    {noStatement(c) ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600" title="Upload this month's settlement statement to reconcile">
-                        Statement Not Uploaded
-                      </span>
-                    ) : noPos(c) ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600" title="Upload this month's Petpooja POS report to compare">
-                        POS Not Uploaded
-                      </span>
-                    ) : partialStatement(c) ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title={`Statements cover ${c.payoutOrders} of ${c.posOrders} POS orders. Upload the missing brands / outlets / weeks.`}>
-                        {(() => {
-                          const m = brandMatchFor(c.channel, c.payoutOrders);
-                          return m ? `Partial: ${m.matched} of ${m.brands} brands` : `Partial: ${c.payoutOrders}/${c.posOrders} orders`;
-                        })()}
-                      </span>
-                    ) : (
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                          c.matchStatus === 'matched'
-                            ? 'bg-emerald-100 text-emerald-800'
+                          {c.posGrossSales > 0 && (
+                            <span className="block text-[10px] font-normal text-slate-400">
+                              ({c.varianceGrossPct >= 0 ? '+' : ''}
+                              {c.varianceGrossPct.toFixed(1)}%)
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+
+                    <td className="py-3.5 px-4 text-center">
+                      {missingStmt && missingPos ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">
+                          No Activity
+                        </span>
+                      ) : missingStmt ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200"
+                          title="Upload this channel's settlement statement to reconcile"
+                        >
+                          Statement Not Uploaded
+                        </span>
+                      ) : missingPos ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200"
+                          title="Payout statement saved! Upload Petpooja POS sales report to compare."
+                        >
+                          Payout Saved · Awaiting POS
+                        </span>
+                      ) : (
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            c.matchStatus === 'matched'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : c.matchStatus === 'minor_variance'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {c.matchStatus === 'matched' && <Check className="w-3 h-3" />}
+                          {c.matchStatus === 'matched'
+                            ? '100% Matched'
                             : c.matchStatus === 'minor_variance'
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-rose-100 text-rose-800'
-                        }`}
-                      >
-                        {c.matchStatus === 'matched' && <Check className="w-3 h-3" />}
-                        {c.matchStatus === 'matched'
-                          ? '100% Matched'
-                          : c.matchStatus === 'minor_variance'
-                          ? 'Minor Variance'
-                          : 'Review Discrepancy'}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                            ? 'Minor Variance'
+                            : 'Review Discrepancy'}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot className="bg-slate-50 font-bold border-t border-slate-200 text-slate-900">
               <tr>
@@ -754,42 +1051,51 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                   {formatINR(channelMatchReport.totalPosGross)}
                 </td>
                 <td className="py-3 px-3 text-right">
-                  {channelMatchReport.channelReports.reduce((s, c) => s + c.posOrders, 0).toLocaleString()}
+                  {channelMatchReport.channelReports.reduce((s, c) => s + c.posOrders, 0).toLocaleString('en-IN')}
                 </td>
                 <td className="py-3 px-3 text-right font-mono">
                   {formatINR(channelMatchReport.channelReports.reduce((s, c) => s + c.payoutGrossSales, 0))}
                 </td>
                 <td className="py-3 px-3 text-right">
-                  {channelMatchReport.channelReports.reduce((s, c) => s + c.payoutOrders, 0).toLocaleString()}
+                  {channelMatchReport.channelReports.reduce((s, c) => s + c.payoutOrders, 0).toLocaleString('en-IN')}
+                </td>
+                <td className="py-3 px-3 text-right font-mono text-rose-700">
+                  {rowsTotalDeductions > 0 ? `-${formatINR(rowsTotalDeductions)}` : '—'}
                 </td>
                 <td className="py-3 px-3 text-right font-mono text-emerald-700">
                   {formatINR(rowsNetCredited)}
                 </td>
-                <td className="py-3 px-3 text-right font-mono" title="Variance of channels that have a statement">
-                  {coveredVariance >= 0 ? '+' : ''}
-                  {formatINR(coveredVariance)}
-                </td>
-                <td className="py-3 px-4 text-center">
-                  {anyIncomplete ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                      Statements Incomplete
+                <td className="py-3 px-3 text-right font-mono">
+                  {reconciledAggregatorRows.length > 0 ? (
+                    <span>
+                      {coveredVariance >= 0 ? '+' : ''}
+                      {formatINR(coveredVariance)}
                     </span>
                   ) : (
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      channelMatchReport.overallStatus === 'matched'
-                        ? 'bg-emerald-100 text-emerald-800'
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+                <td className="py-3 px-4 text-center">
+                  {hasMissingStatementsWherePosExists ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                      Partial Channel Coverage
+                    </span>
+                  ) : (
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                        channelMatchReport.overallStatus === 'matched'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : channelMatchReport.overallStatus === 'minor_variance'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      {channelMatchReport.overallStatus === 'matched'
+                        ? 'Reconciled'
                         : channelMatchReport.overallStatus === 'minor_variance'
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-rose-100 text-rose-800'
-                    }`}
-                  >
-                    {channelMatchReport.overallStatus === 'matched'
-                      ? '100% Matched'
-                      : channelMatchReport.overallStatus === 'minor_variance'
-                      ? 'Minor Variance'
-                      : 'Review Discrepancy'}
-                  </span>
+                        ? 'Minor Variance'
+                        : 'Review Discrepancy'}
+                    </span>
                   )}
                 </td>
               </tr>
@@ -1103,20 +1409,26 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
         <div className="p-4.5 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <FileSpreadsheet className="w-4 h-4 text-slate-600" />
-            Uploaded Platform Settlement Statements ({payouts.length})
+            Confirmed Platform Settlement Statements ({payouts.length})
           </h3>
           <span className="text-xs text-slate-500">
-            Saved in database
+            Click Edit to review or adjust line-item segregation
           </span>
         </div>
 
         <div className="divide-y divide-slate-100 text-xs">
+          {payouts.length === 0 && (
+            <div className="p-8 text-center text-slate-400">
+              No aggregator payout statements uploaded yet. Choose a Swiggy, Zomato, or Ownly Excel/CSV file above to review its segregation and persist to Supabase.
+            </div>
+          )}
+
           {payouts.map((p) => (
             <div
               key={p.id}
               className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors"
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-start sm:items-center gap-3">
                 <div
                   className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shrink-0 ${
                     p.platform.toLowerCase() === 'swiggy'
@@ -1129,46 +1441,102 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                   {p.platform.charAt(0).toUpperCase()}
                 </div>
                 <div>
-                  <div className="font-bold text-slate-900 flex items-center gap-2">
-                    <span>{p.accountName || p.platform.toUpperCase()} Settlement</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 capitalize">
+                  <div className="font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+                    <span>{p.accountName || p.platform.toUpperCase()}</span>
+                    {p.accountId && (
+                      <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-slate-800 text-white">
+                        ID: {p.accountId}
+                      </span>
+                    )}
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold capitalize ${
+                        p.outletId === 'whitefield'
+                          ? 'bg-indigo-50 text-indigo-800 border border-indigo-200'
+                          : 'bg-teal-50 text-teal-800 border border-teal-200'
+                      }`}
+                    >
                       {p.outletId} Outlet
                     </span>
                     {p.periodType && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 capitalize">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 capitalize">
                         {p.periodType} {p.weekLabel ? `(${p.weekLabel})` : ''}
                       </span>
                     )}
                   </div>
-                  <div className="text-[11px] text-slate-500 flex items-center gap-3 mt-0.5">
-                    <span>Month: {p.month}</span>
-                    <span>Orders: {p.orderCount}</span>
-                    {p.hyperpureRecovery > 0 && (
+                  <div className="text-[11px] text-slate-500 flex items-center gap-3 flex-wrap mt-1">
+                    <span>Month: <strong>{p.month}</strong></span>
+                    <span>Orders: <strong>{p.orderCount}</strong></span>
+                    <span>Comm: <strong>{formatINR(p.commissionAmount)}</strong></span>
+                    <span>GST: <strong>{formatINR(p.gstOnCommission)}</strong></span>
+                    {(p.cancellationCharges || 0) > 0 && (
+                      <span>Cancel: <strong>{formatINR(p.cancellationCharges)}</strong></span>
+                    )}
+                    {(p.hyperpureRecovery || 0) > 0 && (
                       <span className="text-teal-700 font-semibold">
                         Hyperpure: {formatINR(p.hyperpureRecovery)}
+                      </span>
+                    )}
+                    {(p.swiggyAssureFee || 0) > 0 && (
+                      <span className="text-amber-700 font-semibold">
+                        Assure: {formatINR(p.swiggyAssureFee || 0)}
+                      </span>
+                    )}
+                    {p.sourceFileName && (
+                      <span className="font-mono text-[10px] text-slate-400">
+                        {p.sourceFileName}
                       </span>
                     )}
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-4 sm:self-center">
+              <div className="flex items-center gap-3 sm:self-center justify-end">
                 <div className="text-right">
                   <div className="font-bold text-slate-900 font-mono">
                     {formatINR(p.grossSales)} Gross
                   </div>
                   <div className="text-[11px] font-bold text-emerald-700 font-mono">
-                    {formatINR(p.actualBankSettlement || p.calculatedNetPayout)} Net Credited
+                    {formatINR(p.actualBankSettlement || p.calculatedNetPayout)} Net Payout
                   </div>
                 </div>
 
                 <button
-                  onClick={() => handleDeletePayout(p.id)}
-                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                  title="Remove Statement"
+                  type="button"
+                  onClick={() => handleOpenEditModal(p)}
+                  className="px-2.5 py-1.5 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Edit Segregation"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>Edit</span>
                 </button>
+
+                {pendingDeleteId === p.id ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteDelete(p.id)}
+                      className="px-2.5 py-1.5 bg-rose-600 text-white rounded-lg font-bold text-[11px] hover:bg-rose-700 cursor-pointer"
+                    >
+                      Confirm Delete
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingDeleteId(null)}
+                      className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteId(p.id)}
+                    className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                    title="Remove Statement"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
           ))}

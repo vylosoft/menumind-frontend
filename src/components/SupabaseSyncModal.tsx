@@ -30,6 +30,7 @@ import { StaffMember } from '../types/payrollStaff';
 import { CateringOrder } from '../types/catering';
 import { PurchaseRecord, InventorySnapshot } from '../types/purchases';
 import { PlatformPayoutRecord } from '../types/finance';
+import { getSavedAggregatorMappings } from '../utils/aggregatorMappingManager';
 
 interface SupabaseSyncModalProps {
   isOpen: boolean;
@@ -174,6 +175,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
           purchases,
           inventorySnapshots,
           payouts,
+          aggregatorMappings: getSavedAggregatorMappings(),
           rawRecords,
           payrollSnapshots,
         }),

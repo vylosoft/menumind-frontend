@@ -176,6 +176,419 @@ export interface SyncPayload {
   rawRecords?: any[];
   payrollSnapshots?: any[];
   payouts?: any[];
+  aggregatorMappings?: any[];
+}
+
+const CORE_AGGREGATOR_MAPPINGS = [
+  { id: 'map-swiggy-762173', platform: 'swiggy', restaurantId: '762173', brandName: 'Banglar Jhale Jhole', outletId: 'banaswadi', isDefault: true, notes: 'Swiggy · Banglar Jhale Jhole · Banaswadi' },
+  { id: 'map-swiggy-881519', platform: 'swiggy', restaurantId: '881519', brandName: 'Banglar Jhale Jhole', outletId: 'whitefield', isDefault: true, notes: 'Swiggy · Banglar Jhale Jhole · Whitefield' },
+  { id: 'map-swiggy-1174333', platform: 'swiggy', restaurantId: '1174333', brandName: 'Niraamish', outletId: 'banaswadi', isDefault: true, notes: 'Swiggy · Niraamish · Banaswadi' },
+  { id: 'map-swiggy-1332609', platform: 'swiggy', restaurantId: '1332609', brandName: 'Niraamish', outletId: 'whitefield', isDefault: true, notes: 'Swiggy · Niraamish · Whitefield' },
+  { id: 'map-zomato-20794526', platform: 'zomato', restaurantId: '20794526', brandName: 'Banglar Jhale Jhole', outletId: 'banaswadi', isDefault: true, notes: 'Zomato · Banglar Jhale Jhole · Banaswadi' },
+  { id: 'map-zomato-21176453', platform: 'zomato', restaurantId: '21176453', brandName: 'Banglar Jhale Jhole', outletId: 'whitefield', isDefault: true, notes: 'Zomato · Banglar Jhale Jhole · Whitefield' },
+  { id: 'map-zomato-22042748', platform: 'zomato', restaurantId: '22042748', brandName: 'Niraamish', outletId: 'banaswadi', isDefault: true, notes: 'Zomato · Niraamish · Banaswadi' },
+  { id: 'map-zomato-22550600', platform: 'zomato', restaurantId: '22550600', brandName: 'Niraamish', outletId: 'whitefield', isDefault: true, notes: 'Zomato · Niraamish · Whitefield' },
+  { id: 'map-ownly-RN421127', platform: 'ownly', restaurantId: 'RN421127', brandName: 'Banglar Jhale Jhole', outletId: 'banaswadi', isDefault: true, notes: 'Ownly · Banglar Jhale Jhole · Banaswadi' },
+  { id: 'map-ownly-RN421125', platform: 'ownly', restaurantId: 'RN421125', brandName: 'Banglar Jhale Jhole', outletId: 'whitefield', isDefault: true, notes: 'Ownly · Banglar Jhale Jhole (-W) · Whitefield' },
+];
+
+/**
+ * Ensures aggregator_restaurant_mappings exists (seeded with the 8 core Swiggy/Zomato IDs)
+ * and upgrades platform_payout_reconciliation to support multi-brand, weekly payouts, OWNLY,
+ * Swiggy Assure, Zomato Hyperpure, other_charges_breakdown JSONB, and duplicate hashes.
+ */
+async function ensurePayoutSchemaAndMappings(client: any, restaurantId: string): Promise<void> {
+  await client.query(
+    `INSERT INTO public.restaurant_outlets (id, restaurant_id, code, name, city)
+     VALUES
+       ('banaswadi', $1, 'BW', 'Banaswadi Outlet', 'Bangalore'),
+       ('whitefield', $1, 'WF', 'Whitefield Outlet', 'Bangalore')
+     ON CONFLICT (id) DO NOTHING;`,
+    [restaurantId]
+  );
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS public.aggregator_restaurant_mappings (
+      id VARCHAR(100) PRIMARY KEY,
+      restaurant_id UUID NOT NULL REFERENCES public.restaurants(id) ON DELETE CASCADE,
+      platform VARCHAR(30) NOT NULL,
+      aggregator_restaurant_id VARCHAR(50) NOT NULL,
+      brand_name VARCHAR(120) NOT NULL,
+      outlet_id VARCHAR(50) NOT NULL REFERENCES public.restaurant_outlets(id) ON DELETE RESTRICT,
+      is_default BOOLEAN NOT NULL DEFAULT false,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+      UNIQUE (restaurant_id, platform, aggregator_restaurant_id)
+    );
+  `);
+
+  for (const m of CORE_AGGREGATOR_MAPPINGS) {
+    await client.query(
+      `INSERT INTO public.aggregator_restaurant_mappings
+       (id, restaurant_id, platform, aggregator_restaurant_id, brand_name, outlet_id, is_default, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, true, $7)
+       ON CONFLICT (restaurant_id, platform, aggregator_restaurant_id) DO UPDATE SET
+         brand_name = EXCLUDED.brand_name,
+         outlet_id = EXCLUDED.outlet_id,
+         is_default = true,
+         notes = EXCLUDED.notes,
+         updated_at = timezone('utc'::text, now())
+       WHERE public.aggregator_restaurant_mappings.is_default = true;`,
+      [m.id, restaurantId, m.platform, m.restaurantId, m.brandName, m.outletId, m.notes]
+    );
+  }
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS public.platform_payout_reconciliation (
+      id VARCHAR(140) PRIMARY KEY,
+      restaurant_id UUID NOT NULL REFERENCES public.restaurants(id) ON DELETE CASCADE,
+      outlet_id VARCHAR(50) NOT NULL REFERENCES public.restaurant_outlets(id) ON DELETE RESTRICT,
+      month_year VARCHAR(7) NOT NULL,
+      platform VARCHAR(30) NOT NULL,
+      gross_sales_reported NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+      customer_discounts_borne NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      net_platform_sales NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+      commission_deducted NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      gst_on_commission NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+      tcs_tds_deducted NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+      cancellation_charges NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+      marketing_ad_deductions NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+      other_deductions NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      net_bank_settlement NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+      actual_bank_credit_received NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+      settlement_variance NUMERIC(12, 2) DEFAULT 0.00,
+      settlement_status VARCHAR(30) NOT NULL DEFAULT 'Reconciled',
+      payout_reference_id VARCHAR(200),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+    );
+  `);
+
+  // Drop legacy single-brand-per-outlet UNIQUE constraint & legacy platform CHECK constraint that rejected OWNLY
+  await client.query(`
+    DO $$
+    DECLARE
+      c RECORD;
+    BEGIN
+      FOR c IN
+        SELECT conname, pg_get_constraintdef(oid) AS def
+        FROM pg_constraint
+        WHERE conrelid = 'public.platform_payout_reconciliation'::regclass
+          AND contype IN ('u', 'c')
+      LOOP
+        IF c.def ILIKE '%UNIQUE (restaurant_id, outlet_id, month_year, platform)%'
+           OR (c.def ILIKE '%platform%' AND c.def NOT ILIKE '%OWNLY%') THEN
+          EXECUTE format('ALTER TABLE public.platform_payout_reconciliation DROP CONSTRAINT IF EXISTS %I', c.conname);
+        END IF;
+      END LOOP;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END $$;
+  `);
+
+  await client.query(`
+    ALTER TABLE public.platform_payout_reconciliation
+      ALTER COLUMN id TYPE VARCHAR(140),
+      ALTER COLUMN payout_reference_id TYPE VARCHAR(200),
+      ADD COLUMN IF NOT EXISTS aggregator_restaurant_id VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS brand_name VARCHAR(120),
+      ADD COLUMN IF NOT EXISTS period_type VARCHAR(20) DEFAULT 'monthly',
+      ADD COLUMN IF NOT EXISTS week_label VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS order_count INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS cancelled_orders INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS packaging_charges NUMERIC(12, 2) DEFAULT 0.00,
+      ADD COLUMN IF NOT EXISTS payment_gateway_fee NUMERIC(12, 2) DEFAULT 0.00,
+      ADD COLUMN IF NOT EXISTS tds_deducted NUMERIC(10, 2) DEFAULT 0.00,
+      ADD COLUMN IF NOT EXISTS swiggy_assure_fee NUMERIC(12, 2) DEFAULT 0.00,
+      ADD COLUMN IF NOT EXISTS hyperpure_recovery NUMERIC(12, 2) DEFAULT 0.00,
+      ADD COLUMN IF NOT EXISTS other_charges_breakdown JSONB DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS direct_sales_cash_upi NUMERIC(14, 2) DEFAULT 0.00,
+      ADD COLUMN IF NOT EXISTS file_name VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS file_hash VARCHAR(128),
+      ADD COLUMN IF NOT EXISTS data_fingerprint VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS zomato_breakup_json JSONB,
+      ADD COLUMN IF NOT EXISTS swiggy_breakup_json JSONB,
+      ADD COLUMN IF NOT EXISTS ownly_breakup_json JSONB;
+  `);
+}
+
+async function upsertPlatformPayoutRow(client: any, restaurantId: string, p: any): Promise<void> {
+  const outletIdVal =
+    String(p.outletId || 'banaswadi').toLowerCase().trim() === 'whitefield'
+      ? 'whitefield'
+      : 'banaswadi';
+  const rawPlatformUpper = String(p.platform || 'SWIGGY').toUpperCase().trim();
+  const platformVal = rawPlatformUpper === 'TOING' ? 'SWIGGY' : rawPlatformUpper;
+  const monthVal = String(p.month || '2026-10').slice(0, 7);
+  const resIdVal = p.accountId ? String(p.accountId).trim() : null;
+  const brandVal = p.accountName ? String(p.accountName).trim() : null;
+  const grossVal = Number(p.grossSales) || 0;
+  const packVal = Number(p.packagingCharges) || 0;
+  const discVal = Number(p.customerDiscounts) || 0;
+  const netVal = Number(p.netSales ?? grossVal + packVal - discVal) || 0;
+  const commVal = Number(p.commissionAmount) || 0;
+  const pgVal = Number(p.paymentGatewayFee) || 0;
+  const gstVal = Number(p.gstOnCommission) || 0;
+  const tcsVal = Number(p.tcsDeduction) || 0;
+  const tdsVal = Number(p.tdsDeduction) || 0;
+  const cancelVal = Number(p.cancellationCharges) || 0;
+  const mktVal = Number(p.advertisingSpend) || 0;
+  const assureVal = Number(p.swiggyAssureFee) || 0;
+  const hyperVal = Number(p.hyperpureRecovery) || 0;
+  const otherVal = Number(p.otherPlatformFees) || 0;
+  const otherJson = JSON.stringify(Array.isArray(p.otherChargesBreakdown) ? p.otherChargesBreakdown : []);
+  const calcNet = Number(p.calculatedNetPayout) || 0;
+  const actualCredit = Number(p.actualBankSettlement ?? calcNet) || 0;
+  const diff = Number(p.settlementDifference ?? calcNet - actualCredit) || 0;
+  const statusVal =
+    p.status === 'reconciled'
+      ? 'Reconciled'
+      : p.status === 'discrepancy'
+      ? 'Disputed'
+      : 'Pending Bank Credit';
+  const periodTypeVal = p.periodType === 'weekly' ? 'weekly' : 'monthly';
+  const weekVal = p.weekLabel || null;
+  const ordersVal = Math.round(Number(p.orderCount) || 0);
+  const cancelledOrdersVal = Math.round(Number(p.cancelledOrders) || 0);
+  const fileNameVal = p.sourceFileName || null;
+  const fileHashVal = p.fileHash || null;
+  const dataFpVal =
+    p.dataFingerprint ||
+    `${platformVal.toLowerCase()}|${resIdVal || ''}|${outletIdVal}|${monthVal}|${periodTypeVal}|${(weekVal || '').toLowerCase()}|${ordersVal}|${Math.round(grossVal)}|${Math.round(actualCredit)}`;
+
+  const zomatoBreakupJson =
+    p.zomatoBreakup && typeof p.zomatoBreakup === 'object'
+      ? JSON.stringify(p.zomatoBreakup)
+      : null;
+
+  const swiggyBreakupJson =
+    p.swiggyBreakup && typeof p.swiggyBreakup === 'object'
+      ? JSON.stringify(p.swiggyBreakup)
+      : null;
+
+  const ownlyBreakupJson =
+    p.ownlyBreakup && typeof p.ownlyBreakup === 'object'
+      ? JSON.stringify(p.ownlyBreakup)
+      : null;
+
+  const rowId = String(
+    p.id || `PAYOUT-${platformVal}-${resIdVal || outletIdVal}-${monthVal}-${periodTypeVal}`
+  ).slice(0, 140);
+
+  await client.query(
+    `INSERT INTO public.platform_payout_reconciliation (
+       id, restaurant_id, outlet_id, month_year, platform,
+       aggregator_restaurant_id, brand_name, period_type, week_label,
+       order_count, cancelled_orders, gross_sales_reported, packaging_charges,
+       customer_discounts_borne, net_platform_sales, commission_deducted,
+       payment_gateway_fee, gst_on_commission, tcs_tds_deducted, tds_deducted,
+       cancellation_charges, marketing_ad_deductions, swiggy_assure_fee,
+       hyperpure_recovery, other_deductions, other_charges_breakdown,
+       net_bank_settlement, actual_bank_credit_received, settlement_variance,
+       settlement_status, payout_reference_id, file_name, file_hash, data_fingerprint,
+       zomato_breakup_json, swiggy_breakup_json, ownly_breakup_json
+     )
+     VALUES (
+       $1, $2, $3, $4, $5,
+       $6, $7, $8, $9,
+       $10, $11, $12, $13,
+       $14, $15, $16,
+       $17, $18, $19, $20,
+       $21, $22, $23,
+       $24, $25, $26::jsonb,
+       $27, $28, $29,
+       $30, $31, $32, $33, $34,
+       $35::jsonb, $36::jsonb, $37::jsonb
+     )
+     ON CONFLICT (id) DO UPDATE SET
+       outlet_id = EXCLUDED.outlet_id,
+       month_year = EXCLUDED.month_year,
+       platform = EXCLUDED.platform,
+       aggregator_restaurant_id = EXCLUDED.aggregator_restaurant_id,
+       brand_name = EXCLUDED.brand_name,
+       period_type = EXCLUDED.period_type,
+       week_label = EXCLUDED.week_label,
+       order_count = EXCLUDED.order_count,
+       cancelled_orders = EXCLUDED.cancelled_orders,
+       gross_sales_reported = EXCLUDED.gross_sales_reported,
+       packaging_charges = EXCLUDED.packaging_charges,
+       customer_discounts_borne = EXCLUDED.customer_discounts_borne,
+       net_platform_sales = EXCLUDED.net_platform_sales,
+       commission_deducted = EXCLUDED.commission_deducted,
+       payment_gateway_fee = EXCLUDED.payment_gateway_fee,
+       gst_on_commission = EXCLUDED.gst_on_commission,
+       tcs_tds_deducted = EXCLUDED.tcs_tds_deducted,
+       tds_deducted = EXCLUDED.tds_deducted,
+       cancellation_charges = EXCLUDED.cancellation_charges,
+       marketing_ad_deductions = EXCLUDED.marketing_ad_deductions,
+       swiggy_assure_fee = EXCLUDED.swiggy_assure_fee,
+       hyperpure_recovery = EXCLUDED.hyperpure_recovery,
+       other_deductions = EXCLUDED.other_deductions,
+       other_charges_breakdown = EXCLUDED.other_charges_breakdown,
+       net_bank_settlement = EXCLUDED.net_bank_settlement,
+       actual_bank_credit_received = EXCLUDED.actual_bank_credit_received,
+       settlement_variance = EXCLUDED.settlement_variance,
+       settlement_status = EXCLUDED.settlement_status,
+       payout_reference_id = EXCLUDED.payout_reference_id,
+       file_name = EXCLUDED.file_name,
+       file_hash = EXCLUDED.file_hash,
+       data_fingerprint = EXCLUDED.data_fingerprint,
+       zomato_breakup_json = EXCLUDED.zomato_breakup_json,
+       swiggy_breakup_json = EXCLUDED.swiggy_breakup_json,
+       ownly_breakup_json = EXCLUDED.ownly_breakup_json,
+       updated_at = now();`,
+    [
+      rowId,
+      restaurantId,
+      outletIdVal,
+      monthVal,
+      platformVal,
+      resIdVal,
+      brandVal,
+      periodTypeVal,
+      weekVal,
+      ordersVal,
+      cancelledOrdersVal,
+      grossVal,
+      packVal,
+      discVal,
+      netVal,
+      commVal,
+      pgVal,
+      gstVal,
+      tcsVal,
+      tdsVal,
+      cancelVal,
+      mktVal,
+      assureVal,
+      hyperVal,
+      otherVal,
+      otherJson,
+      calcNet,
+      actualCredit,
+      diff,
+      statusVal,
+      fileNameVal,
+      fileNameVal,
+      fileHashVal,
+      dataFpVal,
+      zomatoBreakupJson,
+      swiggyBreakupJson,
+      ownlyBreakupJson,
+    ]
+  );
+}
+
+function mapDbRowToPlatformPayout(r: any) {
+  let breakdown: any[] = [];
+  if (Array.isArray(r.other_charges_breakdown)) {
+    breakdown = r.other_charges_breakdown;
+  } else if (typeof r.other_charges_breakdown === 'string') {
+    try {
+      breakdown = JSON.parse(r.other_charges_breakdown);
+    } catch {
+      breakdown = [];
+    }
+  }
+  const grossSales = Number(r.gross_sales_reported) || 0;
+  const commissionAmount = Number(r.commission_deducted) || 0;
+  const rawPlatLower = String(r.platform || 'swiggy').toLowerCase().trim();
+  const platformNorm = (rawPlatLower === 'toing' ? 'swiggy' : rawPlatLower) as
+    | 'swiggy'
+    | 'zomato'
+    | 'ownly';
+
+  let zomatoBreakup: any = undefined;
+  if (r.zomato_breakup_json && typeof r.zomato_breakup_json === 'object') {
+    zomatoBreakup = r.zomato_breakup_json;
+  } else if (typeof r.zomato_breakup_json === 'string') {
+    try {
+      zomatoBreakup = JSON.parse(r.zomato_breakup_json);
+    } catch {
+      zomatoBreakup = undefined;
+    }
+  }
+
+  let swiggyBreakup: any = undefined;
+  if (r.swiggy_breakup_json && typeof r.swiggy_breakup_json === 'object') {
+    swiggyBreakup = r.swiggy_breakup_json;
+  } else if (typeof r.swiggy_breakup_json === 'string') {
+    try {
+      swiggyBreakup = JSON.parse(r.swiggy_breakup_json);
+    } catch {
+      swiggyBreakup = undefined;
+    }
+  }
+
+  let ownlyBreakup: any = undefined;
+  if (r.ownly_breakup_json && typeof r.ownly_breakup_json === 'object') {
+    ownlyBreakup = r.ownly_breakup_json;
+  } else if (typeof r.ownly_breakup_json === 'string') {
+    try {
+      ownlyBreakup = JSON.parse(r.ownly_breakup_json);
+    } catch {
+      ownlyBreakup = undefined;
+    }
+  }
+
+  return {
+    id: r.id,
+    outletId: r.outlet_id === 'whitefield' ? 'whitefield' : 'banaswadi',
+    platform: (['swiggy', 'zomato', 'ownly'].includes(platformNorm) ? platformNorm : 'swiggy') as 'swiggy' | 'zomato' | 'ownly',
+    month: r.month_year,
+    accountId: r.aggregator_restaurant_id || undefined,
+    accountName: r.brand_name || undefined,
+    grossSales,
+    packagingCharges: Number(r.packaging_charges) || 0,
+    customerDiscounts: Number(r.customer_discounts_borne) || 0,
+    netSales: Number(r.net_platform_sales) || 0,
+    orderCount: Number(r.order_count) || 0,
+    cancelledOrders: Number(r.cancelled_orders) || 0,
+    commissionRate: grossSales > 0 ? Math.round((commissionAmount / grossSales) * 10000) / 100 : 0,
+    commissionAmount,
+    paymentGatewayFee: Number(r.payment_gateway_fee) || 0,
+    deliveryChargesCollected: Number(zomatoBreakup?.deliveryChargeCollected) || 0,
+    customerDeliveryFeeShare: 0,
+    advertisingSpend: Number(r.marketing_ad_deductions) || 0,
+    cancellationCharges: Number(r.cancellation_charges) || 0,
+    swiggyAssureFee: Number(r.swiggy_assure_fee) || 0,
+    otherPlatformFees: Number(r.other_deductions) || 0,
+    otherChargesBreakdown: breakdown,
+    gstOnCommission: Number(r.gst_on_commission) || 0,
+    tcsDeduction: Number(r.tcs_tds_deducted) || 0,
+    tdsDeduction: Number(r.tds_deducted) || 0,
+    hyperpureRecovery: Number(r.hyperpure_recovery) || 0,
+    calculatedNetPayout: Number(r.net_bank_settlement) || 0,
+    actualBankSettlement: Number(r.actual_bank_credit_received) || 0,
+    settlementDifference: Number(r.settlement_variance) || 0,
+    status: (
+      r.settlement_status === 'Reconciled'
+        ? 'reconciled'
+        : r.settlement_status === 'Disputed'
+        ? 'discrepancy'
+        : 'pending'
+    ) as 'reconciled' | 'discrepancy' | 'pending',
+    periodType: (r.period_type === 'weekly' ? 'weekly' : 'monthly') as 'monthly' | 'weekly',
+    weekLabel: r.week_label || undefined,
+    payoutStartDate:
+      zomatoBreakup?.payoutStartDate ||
+      swiggyBreakup?.payoutStartDate ||
+      ownlyBreakup?.payoutStartDate ||
+      undefined,
+    payoutEndDate:
+      zomatoBreakup?.payoutEndDate ||
+      swiggyBreakup?.payoutEndDate ||
+      ownlyBreakup?.payoutEndDate ||
+      undefined,
+    directSalesCashUpi: Number(r.direct_sales_cash_upi) || 0,
+    sourceFileName: r.file_name || r.payout_reference_id || undefined,
+    fileHash: r.file_hash || undefined,
+    dataFingerprint: r.data_fingerprint || undefined,
+    zomatoBreakup,
+    swiggyBreakup,
+    ownlyBreakup,
+    payoutDate: r.updated_at ? new Date(r.updated_at).toISOString().slice(0, 10) : undefined,
+  };
 }
 
 export async function syncDataToSupabase(payload: SyncPayload): Promise<{
@@ -309,19 +722,43 @@ export async function syncDataToSupabase(payload: SyncPayload): Promise<{
       }
     }
 
+    await ensureRecipeCostingSchema(client);
+
     // 5. Batch sync Grouping Rules
     let rulesCount = 0;
     if (payload.groupingRules && payload.groupingRules.length > 0) {
       const ruleValues: string[] = [];
       const ruleParams: any[] = [restaurantId];
       let rIdx = 2;
+      const seenPatterns = new Set<string>();
 
       for (const r of payload.groupingRules) {
-        const pId = dishNameToId.get(r.parentDishName.toLowerCase());
+        const rawPat = String(r.pattern || r.rawPattern || '').trim();
+        const parentName = String(r.parentDishName || '').trim();
+        if (!rawPat || !parentName) continue;
+        const patLower = rawPat.toLowerCase();
+        if (seenPatterns.has(patLower)) continue;
+        seenPatterns.add(patLower);
+
+        let pId = dishNameToId.get(parentName.toLowerCase());
+        if (!pId) {
+          const insParent = await client.query(
+            `INSERT INTO public.parent_dishes (restaurant_id, name, category)
+             VALUES ($1, $2, 'General')
+             ON CONFLICT (restaurant_id, name) DO UPDATE SET updated_at = now()
+             RETURNING id;`,
+            [restaurantId, parentName]
+          );
+          pId = insParent.rows[0]?.id;
+          if (pId) dishNameToId.set(parentName.toLowerCase(), pId);
+        }
+
         if (pId) {
-          ruleValues.push(`($1, $${rIdx}, 'EXACT', $${rIdx + 1}, $${rIdx + 2}, $${rIdx + 3}, true)`);
-          ruleParams.push(r.rawPattern, pId, r.targetVariantName || 'Standard', r.confidence || 100);
-          rIdx += 4;
+          const targetVar = String(r.variantName || r.targetVariantName || 'Regular').trim();
+          const isApproved = r.isUserApproved !== undefined ? Boolean(r.isUserApproved) : Boolean(r.isApproved ?? true);
+          ruleValues.push(`($1, $${rIdx}, 'EXACT', $${rIdx + 1}, $${rIdx + 2}, $${rIdx + 3}, $${rIdx + 4})`);
+          ruleParams.push(rawPat, pId, targetVar, Number(r.confidence) || 100, isApproved);
+          rIdx += 5;
           rulesCount++;
         }
       }
@@ -335,7 +772,8 @@ export async function syncDataToSupabase(payload: SyncPayload): Promise<{
            DO UPDATE SET 
              parent_dish_id = EXCLUDED.parent_dish_id,
              target_variant_name = EXCLUDED.target_variant_name,
-             confidence_score = EXCLUDED.confidence_score;`,
+             confidence_score = EXCLUDED.confidence_score,
+             is_approved = EXCLUDED.is_approved;`,
           ruleParams
         );
       }
@@ -345,16 +783,17 @@ export async function syncDataToSupabase(payload: SyncPayload): Promise<{
     let recipesCount = 0;
     let ingredientsCount = 0;
     if (payload.recipes && payload.recipes.length > 0) {
-      // Collect unique ingredients
-      const ingMap = new Map<string, { unit: string; price: number; packSize: number }>();
+      const ingMap = new Map<string, { displayName: string; unit: string; price: number; packSize: number }>();
       payload.recipes.forEach((rec) => {
         if (Array.isArray(rec.ingredients)) {
           rec.ingredients.forEach((ing: any) => {
-            if (ing.name && !ingMap.has(ing.name.toLowerCase())) {
-              ingMap.set(ing.name.toLowerCase(), {
-                unit: ing.unit || 'g',
-                price: ing.purchasePrice || 0,
-                packSize: ing.purchasePackSize || 1,
+            const cleanName = String(ing.name || '').trim();
+            if (cleanName && !ingMap.has(cleanName.toLowerCase())) {
+              ingMap.set(cleanName.toLowerCase(), {
+                displayName: cleanName,
+                unit: normalizeDbMeasurementUnit(ing.purchasePackUnit || ing.unit),
+                price: Number(ing.purchasePrice ?? ing.directPortionCost ?? 0) || 0,
+                packSize: Math.max(0.001, Number(ing.purchasePackSize) || 1),
               });
             }
           });
@@ -366,79 +805,116 @@ export async function syncDataToSupabase(payload: SyncPayload): Promise<{
         const ingParams: any[] = [restaurantId];
         let iIdx = 2;
 
-        for (const [name, data] of ingMap.entries()) {
-          ingValues.push(`($1, $${iIdx}, $${iIdx + 1}, $${iIdx + 2})`);
-          ingParams.push(name, data.price, data.packSize);
-          iIdx += 3;
+        for (const [, data] of ingMap.entries()) {
+          ingValues.push(`($1, $${iIdx}, $${iIdx + 1}, $${iIdx + 2}, $${iIdx + 3})`);
+          ingParams.push(data.displayName, data.price, data.packSize, data.unit);
+          iIdx += 4;
           ingredientsCount++;
         }
 
         await client.query(
-          `INSERT INTO public.ingredients (restaurant_id, name, default_purchase_price, purchase_pack_size)
+          `INSERT INTO public.ingredients (restaurant_id, name, default_purchase_price, purchase_pack_size, purchase_pack_unit)
            VALUES ${ingValues.join(', ')}
            ON CONFLICT (restaurant_id, name)
            DO UPDATE SET 
              default_purchase_price = EXCLUDED.default_purchase_price,
              purchase_pack_size = EXCLUDED.purchase_pack_size,
+             purchase_pack_unit = EXCLUDED.purchase_pack_unit,
              updated_at = now();`,
           ingParams
         );
       }
 
-      // Map ingredient names to IDs
       const ingDbRes = await client.query(
         'SELECT id, name FROM public.ingredients WHERE restaurant_id = $1;',
         [restaurantId]
       );
       const ingNameToId = new Map<string, string>();
-      ingDbRes.rows.forEach((r) => ingNameToId.set(r.name.toLowerCase(), r.id));
+      ingDbRes.rows.forEach((r) => ingNameToId.set(String(r.name || '').toLowerCase(), r.id));
 
-      // Sync Recipes
       for (const rec of payload.recipes) {
-        const pId = dishNameToId.get((rec.parentDishName || '').toLowerCase());
+        const pName = String(rec.parentDishName || '').trim();
+        if (!pName) continue;
+        let pId = dishNameToId.get(pName.toLowerCase());
+        if (!pId) {
+          const insParent = await client.query(
+            `INSERT INTO public.parent_dishes (restaurant_id, name, category)
+             VALUES ($1, $2, 'General')
+             ON CONFLICT (restaurant_id, name) DO UPDATE SET updated_at = now()
+             RETURNING id;`,
+            [restaurantId, pName]
+          );
+          pId = insParent.rows[0]?.id;
+          if (pId) dishNameToId.set(pName.toLowerCase(), pId);
+        }
         if (!pId) continue;
+
+        const isManualOnly =
+          Boolean(rec.isManualCostOnly) ||
+          ((!Array.isArray(rec.ingredients) || rec.ingredients.length === 0) &&
+            rec.manualUnitCost !== undefined);
+        const unitCostOverride =
+          rec.manualUnitCost !== undefined && rec.manualUnitCost !== null
+            ? Number(rec.manualUnitCost)
+            : Number(rec.totalVariableCostPerPortion ?? rec.totalIngredientCost ?? 0);
 
         const recipeRes = await client.query(
           `INSERT INTO public.recipes 
-           (restaurant_id, parent_dish_id, recipe_name, batch_yield_servings, packaging_cost_per_portion, cooking_fuel_cost_per_portion, direct_labor_cost_per_portion, other_variable_cost_per_portion)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (restaurant_id, parent_dish_id, recipe_name, variant_name, batch_yield_servings, packaging_cost_per_portion, cooking_fuel_cost_per_portion, direct_labor_cost_per_portion, other_variable_cost_per_portion, unit_cost_override, is_manual_cost_only, source_pdf_name, bom_json)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            ON CONFLICT (restaurant_id, parent_dish_id, recipe_name)
            DO UPDATE SET 
+             variant_name = EXCLUDED.variant_name,
              batch_yield_servings = EXCLUDED.batch_yield_servings,
              packaging_cost_per_portion = EXCLUDED.packaging_cost_per_portion,
              cooking_fuel_cost_per_portion = EXCLUDED.cooking_fuel_cost_per_portion,
              direct_labor_cost_per_portion = EXCLUDED.direct_labor_cost_per_portion,
              other_variable_cost_per_portion = EXCLUDED.other_variable_cost_per_portion,
+             unit_cost_override = EXCLUDED.unit_cost_override,
+             is_manual_cost_only = EXCLUDED.is_manual_cost_only,
+             source_pdf_name = COALESCE(EXCLUDED.source_pdf_name, public.recipes.source_pdf_name),
+             bom_json = EXCLUDED.bom_json,
              updated_at = now()
            RETURNING id;`,
           [
             restaurantId,
             pId,
-            rec.recipeName || `${rec.parentDishName} Recipe`,
-            rec.batchYieldServings || 1,
-            rec.packagingCost || 0,
-            rec.cookingFuelCost || 0,
-            rec.directLaborCost || 0,
-            rec.otherVariableCost || 0,
+            rec.recipeName || `${pName} Recipe`,
+            rec.variantName || 'All Variants',
+            Math.max(1, Number(rec.batchYieldServings) || 1),
+            Number(rec.packagingCost) || 0,
+            Number(rec.cookingFuelCost) || 0,
+            Number(rec.directLaborCost) || 0,
+            Number(rec.otherVariableCost) || 0,
+            unitCostOverride,
+            isManualOnly,
+            rec.sourcePdfName || null,
+            JSON.stringify(Array.isArray(rec.ingredients) ? rec.ingredients : []),
           ]
         );
 
         const recipeId = recipeRes.rows[0].id;
         recipesCount++;
 
-        // Clear existing BOM lines for this recipe
         await client.query('DELETE FROM public.recipe_ingredients WHERE recipe_id = $1;', [recipeId]);
 
         if (Array.isArray(rec.ingredients) && rec.ingredients.length > 0) {
           const bomValues: string[] = [];
           const bomParams: any[] = [recipeId];
           let bIdx = 2;
+          const seenIngIds = new Set<string>();
 
           for (const ing of rec.ingredients) {
-            const ingId = ingNameToId.get((ing.name || '').toLowerCase());
-            if (ingId) {
+            const ingId = ingNameToId.get(String(ing.name || '').trim().toLowerCase());
+            if (ingId && !seenIngIds.has(ingId)) {
+              seenIngIds.add(ingId);
               bomValues.push(`($1, $${bIdx}, $${bIdx + 1}, $${bIdx + 2}, $${bIdx + 3})`);
-              bomParams.push(ingId, ing.quantity || 1, ing.unit || 'g', ing.calculatedCostPerPortion || 0);
+              bomParams.push(
+                ingId,
+                Math.max(0.001, Number(ing.quantity) || 1),
+                normalizeDbMeasurementUnit(ing.unit),
+                Number(ing.calculatedCostPerPortion ?? ing.directPortionCost ?? 0) || 0
+              );
               bIdx += 4;
             }
           }
@@ -838,81 +1314,45 @@ export async function syncDataToSupabase(payload: SyncPayload): Promise<{
     }
 
     // ==============================================================================
-    // 14. NEW: Sync Aggregator Platform Payouts (Swiggy, Zomato, Ownly)
+    // 14. Sync Aggregator Restaurant ID Mappings & Platform Payouts (Swiggy, Zomato, Ownly)
     // ==============================================================================
+    await ensurePayoutSchemaAndMappings(client, restaurantId);
+
+    if (Array.isArray(payload.aggregatorMappings) && payload.aggregatorMappings.length > 0) {
+      for (const m of payload.aggregatorMappings) {
+        if (!m?.restaurantId) continue;
+        const plat = String(m.platform || 'swiggy').toLowerCase().trim();
+        const resIdStr = String(m.restaurantId).trim();
+        const outId = String(m.outletId || 'banaswadi').toLowerCase().includes('white')
+          ? 'whitefield'
+          : 'banaswadi';
+        await client.query(
+          `INSERT INTO public.aggregator_restaurant_mappings
+           (id, restaurant_id, platform, aggregator_restaurant_id, brand_name, outlet_id, is_default, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (restaurant_id, platform, aggregator_restaurant_id) DO UPDATE SET
+             brand_name = EXCLUDED.brand_name,
+             outlet_id = EXCLUDED.outlet_id,
+             notes = EXCLUDED.notes,
+             updated_at = now();`,
+          [
+            m.id || `map-${plat}-${resIdStr}`,
+            restaurantId,
+            plat,
+            resIdStr,
+            String(m.brandName || 'Banglar Jhale Jhole').trim(),
+            outId,
+            Boolean(m.isDefault),
+            m.notes || null,
+          ]
+        );
+      }
+    }
+
     let payoutsCount = 0;
     if (Array.isArray(payload.payouts) && payload.payouts.length > 0) {
       for (const p of payload.payouts) {
-        const outletIdVal = (p.outletId || 'whitefield').toLowerCase().trim() === 'banaswadi' ? 'banaswadi' : 'whitefield';
-        const platformVal = (p.platform || 'ZOMATO').toUpperCase().trim();
-        const monthVal = p.month || '2026-10';
-        const grossVal = Number(p.grossSales) || 0;
-        const discVal = Number(p.customerDiscounts) || 0;
-        const netVal = Number(p.netSales) || Math.max(0, grossVal - discVal);
-        const commVal = Number(p.commissionAmount) || 0;
-        const gstVal = Number(p.gstOnCommission) || Math.round(commVal * 0.18);
-        const tcsVal = Number(p.tcsDeduction || (netVal * 0.01)) || 0;
-        const cancelVal = Number(p.cancellationCharges) || 0;
-        const mktVal = Number(p.advertisingSpend) || 0;
-        const otherVal = Number(p.otherPlatformFees || p.paymentGatewayFee) || 0;
-        const hyperVal = Number(p.hyperpureRecovery) || 0;
-        const calcNet = Number(p.calculatedNetPayout) || Math.max(0, netVal - commVal - gstVal - tcsVal - hyperVal);
-        const actualCredit = Number(p.actualBankSettlement) || calcNet;
-        const diff = Number(p.settlementDifference) || (calcNet - actualCredit);
-        const statusVal = p.status === 'reconciled' ? 'Reconciled' : p.status === 'discrepancy' ? 'Disputed' : 'Pending Bank Credit';
-        const periodTypeVal = p.periodType || 'monthly';
-        const weekVal = p.weekLabel || null;
-        const ordersVal = Number(p.orderCount) || 0;
-
-        await client.query(
-          `INSERT INTO public.platform_payout_reconciliation
-           (id, restaurant_id, outlet_id, month_year, platform, gross_sales_reported, customer_discounts_borne, net_platform_sales, commission_deducted, gst_on_commission, tcs_tds_deducted, cancellation_charges, marketing_ad_deductions, other_deductions, hyperpure_recovery, net_bank_settlement, actual_bank_credit_received, settlement_variance, settlement_status, payout_reference_id, period_type, week_label, order_count)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-           ON CONFLICT (restaurant_id, outlet_id, month_year, platform) DO UPDATE SET
-             gross_sales_reported = EXCLUDED.gross_sales_reported,
-             customer_discounts_borne = EXCLUDED.customer_discounts_borne,
-             net_platform_sales = EXCLUDED.net_platform_sales,
-             commission_deducted = EXCLUDED.commission_deducted,
-             gst_on_commission = EXCLUDED.gst_on_commission,
-             tcs_tds_deducted = EXCLUDED.tcs_tds_deducted,
-             cancellation_charges = EXCLUDED.cancellation_charges,
-             marketing_ad_deductions = EXCLUDED.marketing_ad_deductions,
-             other_deductions = EXCLUDED.other_deductions,
-             hyperpure_recovery = EXCLUDED.hyperpure_recovery,
-             net_bank_settlement = EXCLUDED.net_bank_settlement,
-             actual_bank_credit_received = EXCLUDED.actual_bank_credit_received,
-             settlement_variance = EXCLUDED.settlement_variance,
-             settlement_status = EXCLUDED.settlement_status,
-             period_type = EXCLUDED.period_type,
-             week_label = EXCLUDED.week_label,
-             order_count = EXCLUDED.order_count,
-             updated_at = now();`,
-          [
-            p.id || `PAYOUT-${platformVal}-${outletIdVal}-${monthVal}`,
-            restaurantId,
-            outletIdVal,
-            monthVal,
-            platformVal,
-            grossVal,
-            discVal,
-            netVal,
-            commVal,
-            gstVal,
-            tcsVal,
-            cancelVal,
-            mktVal,
-            otherVal,
-            hyperVal,
-            calcNet,
-            actualCredit,
-            diff,
-            statusVal,
-            p.sourceFileName || null,
-            periodTypeVal,
-            weekVal,
-            ordersVal,
-          ]
-        );
+        await upsertPlatformPayoutRow(client, restaurantId, p);
         payoutsCount++;
       }
     }
@@ -1142,6 +1582,7 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
     rawRecords: any[];
     reconciliation: any;
     payouts?: any[];
+    aggregatorMappings?: any[];
   };
 }> {
   const db = getDatabasePool();
@@ -1389,12 +1830,104 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
     );
     const groupingRules = rulesRes.rows.map((r) => ({
       id: r.id,
+      pattern: r.raw_pattern,
       rawPattern: r.raw_pattern,
       parentDishName: r.parent_dish_name,
-      targetVariantName: r.target_variant_name,
+      variantName: r.target_variant_name || 'Regular',
+      targetVariantName: r.target_variant_name || 'Regular',
       confidence: Number(r.confidence_score) || 100,
-      isApproved: r.is_approved,
+      isUserApproved: Boolean(r.is_approved ?? true),
+      isApproved: Boolean(r.is_approved ?? true),
+      matchType: 'manual' as const,
     }));
+
+    // 7b. Load Dish Recipes & BOMs
+    let loadedRecipes: any[] = [];
+    try {
+      await ensureRecipeCostingSchema(client);
+      const recRes = await client.query(
+        `SELECT r.*, p.name AS parent_dish_name
+         FROM public.recipes r
+         JOIN public.parent_dishes p ON r.parent_dish_id = p.id
+         WHERE r.restaurant_id = $1
+         ORDER BY r.updated_at DESC;`,
+        [restId]
+      );
+
+      const bomLinesRes = await client.query(
+        `SELECT ri.*, i.name AS ingredient_name, i.default_purchase_price, i.purchase_pack_size, i.purchase_pack_unit, i.edible_yield_pct, i.prep_loss_pct
+         FROM public.recipe_ingredients ri
+         JOIN public.recipes r ON ri.recipe_id = r.id
+         JOIN public.ingredients i ON ri.ingredient_id = i.id
+         WHERE r.restaurant_id = $1;`,
+        [restId]
+      );
+
+      const bomByRecipeId = new Map<string, any[]>();
+      for (const row of bomLinesRes.rows) {
+        const list = bomByRecipeId.get(row.recipe_id) || [];
+        list.push({
+          id: row.id,
+          name: row.ingredient_name,
+          quantity: Number(row.quantity_per_batch) || 1,
+          unit: normalizeDbMeasurementUnit(row.unit),
+          purchasePrice: Number(row.default_purchase_price) || 0,
+          purchasePackSize: Number(row.purchase_pack_size) || 1,
+          purchasePackUnit: normalizeDbMeasurementUnit(row.purchase_pack_unit),
+          yieldPct: Number(row.edible_yield_pct) || 100,
+          preparationLossPct: Number(row.prep_loss_pct) || 0,
+          calculatedCostPerPortion: Number(row.calculated_portion_cost) || 0,
+        });
+        bomByRecipeId.set(row.recipe_id, list);
+      }
+
+      loadedRecipes = recRes.rows.map((r) => {
+        const jsonIngredients = Array.isArray(r.bom_json) ? r.bom_json : [];
+        const ingredients =
+          jsonIngredients.length > 0 ? jsonIngredients : bomByRecipeId.get(r.id) || [];
+        const batchYield = Math.max(1, Number(r.batch_yield_servings) || 1);
+        const pkg = Number(r.packaging_cost_per_portion) || 0;
+        const fuel = Number(r.cooking_fuel_cost_per_portion) || 0;
+        const labor = Number(r.direct_labor_cost_per_portion) || 0;
+        const other = Number(r.other_variable_cost_per_portion) || 0;
+        const isManualOnly =
+          Boolean(r.is_manual_cost_only) ||
+          (ingredients.length === 0 && r.unit_cost_override !== null && r.unit_cost_override !== undefined);
+
+        const sumIng = ingredients.reduce(
+          (acc: number, item: any) => acc + (Number(item.calculatedCostPerPortion ?? item.directPortionCost) || 0),
+          0
+        );
+        const totalIngCost = isManualOnly
+          ? Number(r.unit_cost_override) || 0
+          : Math.round((sumIng / batchYield) * 100) / 100;
+        const totalVarCost = Math.round((totalIngCost + pkg + fuel + labor + other) * 100) / 100;
+
+        return {
+          id: r.id,
+          parentDishName: r.parent_dish_name,
+          variantName: r.variant_name || 'All Variants',
+          recipeName: r.recipe_name,
+          batchYieldServings: batchYield,
+          ingredients,
+          totalIngredientCost: totalIngCost,
+          packagingCost: pkg,
+          cookingFuelCost: fuel,
+          directLaborCost: labor,
+          otherVariableCost: other,
+          totalVariableCostPerPortion: totalVarCost,
+          manualUnitCost:
+            r.unit_cost_override !== null && r.unit_cost_override !== undefined
+              ? Number(r.unit_cost_override)
+              : undefined,
+          isManualCostOnly: isManualOnly,
+          sourcePdfName: r.source_pdf_name || undefined,
+          lastUpdated: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+        };
+      });
+    } catch (recErr) {
+      console.warn('Could not load recipes from Supabase:', recErr);
+    }
 
     // 8. Load Fixed Operating Costs
     const fcRes = await client.query(
@@ -1511,40 +2044,29 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
       console.warn('Could not load raw_pos_sales_records:', salesErr);
     }
 
-    // 11. Load Platform Payout Reconciliation Records (Swiggy, Zomato, Ownly)
+    // 11. Load Platform Payout Reconciliation Records & Aggregator Restaurant ID Mappings
     let payouts: any[] = [];
+    let aggregatorMappings: any[] = [];
     try {
+      await ensurePayoutSchemaAndMappings(client, restId);
       const payoutRes = await client.query(
-        `SELECT * FROM public.platform_payout_reconciliation WHERE restaurant_id = $1 ORDER BY month_year DESC, platform ASC;`,
+        `SELECT * FROM public.platform_payout_reconciliation WHERE restaurant_id = $1 ORDER BY month_year DESC, updated_at DESC;`,
         [restId]
       );
-      payouts = payoutRes.rows.map((r) => ({
-        id: r.id,
-        outletId: r.outlet_id === 'banaswadi' ? 'banaswadi' : 'whitefield',
-        platform: r.platform,
-        month: r.month_year,
-        grossSales: Number(r.gross_sales_reported) || 0,
-        customerDiscounts: Number(r.customer_discounts_borne) || 0,
-        netSales: Number(r.net_platform_sales) || 0,
-        commissionAmount: Number(r.commission_deducted) || 0,
-        gstOnCommission: Number(r.gst_on_commission) || 0,
-        paymentGatewayFee: 0,
-        deliveryFees: 0,
-        cancellationCharges: Number(r.cancellation_charges) || 0,
-        advertisingSpend: Number(r.marketing_ad_deductions) || 0,
-        tcsDeduction: Number(r.tcs_tds_deducted) || 0,
-        otherPlatformFees: Number(r.other_deductions) || 0,
-        hyperpureRecovery: Number(r.hyperpure_recovery) || 0,
-        calculatedNetPayout: Number(r.net_bank_settlement) || 0,
-        actualBankSettlement: Number(r.actual_bank_credit_received) || 0,
-        settlementDifference: Number(r.settlement_variance) || 0,
-        status: (r.settlement_status === 'Reconciled' ? 'reconciled' : r.settlement_status === 'Disputed' ? 'discrepancy' : 'pending') as any,
-        periodType: r.period_type || 'monthly',
-        weekLabel: r.week_label || undefined,
-        orderCount: Number(r.order_count) || 0,
-        directSalesCashUpi: Number(r.direct_sales_cash_upi) || 0,
-        sourceFileName: r.payout_reference_id || undefined,
-        payoutDate: r.updated_at ? r.updated_at.toISOString().slice(0, 10) : undefined,
+      payouts = payoutRes.rows.map(mapDbRowToPlatformPayout);
+
+      const mapRes = await client.query(
+        `SELECT * FROM public.aggregator_restaurant_mappings WHERE restaurant_id = $1 ORDER BY platform ASC, brand_name ASC;`,
+        [restId]
+      );
+      aggregatorMappings = mapRes.rows.map((m: any) => ({
+        id: m.id,
+        platform: String(m.platform || 'swiggy').toLowerCase(),
+        restaurantId: m.aggregator_restaurant_id,
+        brandName: m.brand_name,
+        outletId: m.outlet_id === 'whitefield' ? 'whitefield' : 'banaswadi',
+        isDefault: Boolean(m.is_default),
+        notes: m.notes || undefined,
       }));
     } catch (payoutErr) {
       console.warn('Could not load platform_payout_reconciliation:', payoutErr);
@@ -1557,7 +2079,7 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
       data: {
         restaurant,
         parentDishes: [], // Loaded from POS imports
-        recipes: [],
+        recipes: loadedRecipes,
         groupingRules,
         fixedCosts,
         operatingExpenses,
@@ -1569,11 +2091,505 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
         rawRecords,
         reconciliation,
         payouts,
+        aggregatorMappings,
       },
     };
   } catch (err: any) {
     client.release();
     console.error('Error loading data from Supabase:', err);
+    throw err;
+  }
+}
+
+/**
+ * Persists user-confirmed Aggregator Payout statement(s) to Supabase after duplicate check.
+ */
+export async function saveConfirmedPayoutsToSupabase(payload: {
+  payouts: any[];
+  mappings?: any[];
+  mode?: 'create' | 'edit';
+  restaurantName?: string;
+}): Promise<{
+  success: boolean;
+  savedCount: number;
+  allPayouts: any[];
+}> {
+  const db = getDatabasePool();
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    let restaurantId: string;
+    const restRes = await client.query('SELECT id FROM public.restaurants LIMIT 1');
+    if (restRes.rows.length > 0) {
+      restaurantId = restRes.rows[0].id;
+    } else {
+      const createRest = await client.query(
+        `INSERT INTO public.restaurants (name, currency, pos_type)
+         VALUES ($1, 'INR', 'PETPOOJA') RETURNING id;`,
+        [payload.restaurantName || 'MenuMind Grand Dining']
+      );
+      restaurantId = createRest.rows[0].id;
+    }
+
+    await ensurePayoutSchemaAndMappings(client, restaurantId);
+
+    // Server-side duplicate rejection on newly uploaded files
+    if (payload.mode !== 'edit') {
+      for (const p of payload.payouts) {
+        const rowId = String(p.id || '');
+        const fileHash = p.fileHash ? String(p.fileHash).trim() : '';
+        const fileName = p.sourceFileName ? String(p.sourceFileName).trim() : '';
+        const dataFp = p.dataFingerprint ? String(p.dataFingerprint).trim() : '';
+
+        if (fileHash) {
+          const dupHash = await client.query(
+            `SELECT id, file_name, brand_name, outlet_id, month_year
+             FROM public.platform_payout_reconciliation
+             WHERE restaurant_id = $1 AND file_hash = $2 AND id <> $3
+             LIMIT 1;`,
+            [restaurantId, fileHash, rowId]
+          );
+          if (dupHash.rows.length > 0) {
+            const ex = dupHash.rows[0];
+            const err: any = new Error(
+              `Duplicate File Rejected by Supabase: "${fileName || 'File'}" matches already-stored statement "${ex.file_name || ex.id}" (${ex.brand_name || ''} · ${ex.outlet_id} · ${ex.month_year}).`
+            );
+            err.statusCode = 409;
+            throw err;
+          }
+        }
+
+        if (fileName) {
+          const dupName = await client.query(
+            `SELECT id, file_name, brand_name, outlet_id, month_year
+             FROM public.platform_payout_reconciliation
+             WHERE restaurant_id = $1 AND LOWER(COALESCE(file_name, payout_reference_id, '')) = LOWER($2) AND id <> $3
+             LIMIT 1;`,
+            [restaurantId, fileName, rowId]
+          );
+          if (dupName.rows.length > 0) {
+            const ex = dupName.rows[0];
+            const err: any = new Error(
+              `Duplicate File Rejected by Supabase: "${fileName}" was already uploaded (${ex.brand_name || ''} · ${ex.outlet_id} · ${ex.month_year}).`
+            );
+            err.statusCode = 409;
+            throw err;
+          }
+        }
+
+        if (dataFp) {
+          const dupFp = await client.query(
+            `SELECT id, file_name, brand_name, outlet_id, month_year
+             FROM public.platform_payout_reconciliation
+             WHERE restaurant_id = $1 AND data_fingerprint = $2 AND id <> $3
+             LIMIT 1;`,
+            [restaurantId, dataFp, rowId]
+          );
+          if (dupFp.rows.length > 0) {
+            const ex = dupFp.rows[0];
+            const err: any = new Error(
+              `Duplicate Payout Data Rejected by Supabase: Identical settlement figures already exist in "${ex.file_name || ex.id}" (${ex.brand_name || ''} · ${ex.outlet_id} · ${ex.month_year}).`
+            );
+            err.statusCode = 409;
+            throw err;
+          }
+        }
+      }
+    }
+
+    // Upsert any newly added/updated Restaurant ID mappings
+    if (Array.isArray(payload.mappings) && payload.mappings.length > 0) {
+      for (const m of payload.mappings) {
+        if (!m?.restaurantId) continue;
+        const plat = String(m.platform || 'swiggy').toLowerCase().trim();
+        const resIdStr = String(m.restaurantId).trim();
+        const outId = String(m.outletId || 'banaswadi').toLowerCase().includes('white')
+          ? 'whitefield'
+          : 'banaswadi';
+        await client.query(
+          `INSERT INTO public.aggregator_restaurant_mappings
+           (id, restaurant_id, platform, aggregator_restaurant_id, brand_name, outlet_id, is_default, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (restaurant_id, platform, aggregator_restaurant_id) DO UPDATE SET
+             brand_name = EXCLUDED.brand_name,
+             outlet_id = EXCLUDED.outlet_id,
+             notes = EXCLUDED.notes,
+             updated_at = now();`,
+          [
+            m.id || `map-${plat}-${resIdStr}`,
+            restaurantId,
+            plat,
+            resIdStr,
+            String(m.brandName || 'Banglar Jhale Jhole').trim(),
+            outId,
+            Boolean(m.isDefault),
+            m.notes || null,
+          ]
+        );
+      }
+    }
+
+    for (const p of payload.payouts) {
+      await upsertPlatformPayoutRow(client, restaurantId, p);
+    }
+
+    const allRes = await client.query(
+      `SELECT * FROM public.platform_payout_reconciliation WHERE restaurant_id = $1 ORDER BY month_year DESC, updated_at DESC;`,
+      [restaurantId]
+    );
+
+    await client.query('COMMIT');
+    client.release();
+
+    return {
+      success: true,
+      savedCount: payload.payouts.length,
+      allPayouts: allRes.rows.map(mapDbRowToPlatformPayout),
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    client.release();
+    throw err;
+  }
+}
+
+export async function deletePayoutFromSupabase(payoutId: string): Promise<{ success: boolean }> {
+  const db = getDatabasePool();
+  const client = await db.connect();
+  try {
+    await client.query('DELETE FROM public.platform_payout_reconciliation WHERE id = $1;', [payoutId]);
+    client.release();
+    return { success: true };
+  } catch (err) {
+    client.release();
+    throw err;
+  }
+}
+
+export async function saveAggregatorMappingsToSupabase(mappings: any[]): Promise<{ success: boolean; count: number }> {
+  const db = getDatabasePool();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const restRes = await client.query('SELECT id FROM public.restaurants LIMIT 1');
+    let restaurantId: string;
+    if (restRes.rows.length > 0) {
+      restaurantId = restRes.rows[0].id;
+    } else {
+      const createRest = await client.query(
+        `INSERT INTO public.restaurants (name, currency, pos_type)
+         VALUES ('MenuMind Grand Dining', 'INR', 'PETPOOJA') RETURNING id;`
+      );
+      restaurantId = createRest.rows[0].id;
+    }
+
+    await ensurePayoutSchemaAndMappings(client, restaurantId);
+
+    // Replace custom/current mappings cleanly
+    await client.query(
+      'DELETE FROM public.aggregator_restaurant_mappings WHERE restaurant_id = $1;',
+      [restaurantId]
+    );
+
+    let count = 0;
+    for (const m of mappings) {
+      if (!m?.restaurantId) continue;
+      const plat = String(m.platform || 'swiggy').toLowerCase().trim();
+      const resIdStr = String(m.restaurantId).trim();
+      const outId = String(m.outletId || 'banaswadi').toLowerCase().includes('white')
+        ? 'whitefield'
+        : 'banaswadi';
+      await client.query(
+        `INSERT INTO public.aggregator_restaurant_mappings
+         (id, restaurant_id, platform, aggregator_restaurant_id, brand_name, outlet_id, is_default, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (restaurant_id, platform, aggregator_restaurant_id) DO UPDATE SET
+           brand_name = EXCLUDED.brand_name,
+           outlet_id = EXCLUDED.outlet_id,
+           notes = EXCLUDED.notes,
+           updated_at = now();`,
+        [
+          m.id || `map-${plat}-${resIdStr}`,
+          restaurantId,
+          plat,
+          resIdStr,
+          String(m.brandName || 'Banglar Jhale Jhole').trim(),
+          outId,
+          Boolean(m.isDefault),
+          m.notes || null,
+        ]
+      );
+      count++;
+    }
+
+    await client.query('COMMIT');
+    client.release();
+    return { success: true, count };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    client.release();
+    throw err;
+  }
+}
+
+function normalizeDbMeasurementUnit(raw?: string): string {
+  const clean = String(raw || 'g').toLowerCase().replace(/\./g, '').trim();
+  if (clean === 'kg' || clean === 'kgs' || clean === 'kilogram' || clean === 'kilograms') return 'kg';
+  if (clean === 'g' || clean === 'gm' || clean === 'gms' || clean === 'gram' || clean === 'grams') return 'g';
+  if (clean === 'l' || clean === 'ltr' || clean === 'ltrs' || clean === 'liter' || clean === 'liters') return 'l';
+  if (clean === 'litre' || clean === 'litres') return 'litre';
+  if (clean === 'ml' || clean === 'milliliter' || clean === 'millilitre') return 'ml';
+  if (clean === 'tbsp' || clean === 'tablespoon' || clean === 'tablespoons') return 'tbsp';
+  if (clean === 'tsp' || clean === 'teaspoon' || clean === 'teaspoons') return 'tsp';
+  if (clean === 'pc' || clean === 'pcs') return 'pc';
+  if (clean === 'portion' || clean === 'portions') return 'portion';
+  if (
+    clean === 'piece' ||
+    clean === 'pieces' ||
+    clean === 'no' ||
+    clean === 'nos' ||
+    clean === 'unit' ||
+    clean === 'units' ||
+    clean === 'plate' ||
+    clean === 'pkt' ||
+    clean === 'pack'
+  ) {
+    return 'piece';
+  }
+  return 'g';
+}
+
+async function ensureRecipeCostingSchema(client: any): Promise<void> {
+  await client.query(`
+    ALTER TABLE public.recipes
+      ADD COLUMN IF NOT EXISTS variant_name TEXT DEFAULT 'All Variants',
+      ADD COLUMN IF NOT EXISTS unit_cost_override NUMERIC(12, 2),
+      ADD COLUMN IF NOT EXISTS is_manual_cost_only BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS source_pdf_name TEXT,
+      ADD COLUMN IF NOT EXISTS bom_json JSONB;
+  `);
+}
+
+export async function saveDishRecipeToSupabase(payload: {
+  recipe: any;
+  parentDish?: any;
+  groupingRules?: any[];
+  restaurantName?: string;
+}): Promise<{
+  success: boolean;
+  recipeId: string;
+  parentDishId: string;
+}> {
+  const db = getDatabasePool();
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+    await ensureRecipeCostingSchema(client);
+
+    const restRes = await client.query('SELECT id FROM public.restaurants LIMIT 1');
+    let restaurantId: string;
+    if (restRes.rows.length > 0) {
+      restaurantId = restRes.rows[0].id;
+    } else {
+      const createRest = await client.query(
+        `INSERT INTO public.restaurants (name, currency, pos_type)
+         VALUES ($1, 'INR', 'PETPOOJA') RETURNING id;`,
+        [payload.restaurantName || 'MenuMind Grand Dining']
+      );
+      restaurantId = createRest.rows[0].id;
+    }
+
+    const rec = payload.recipe;
+    const parentName = String(rec?.parentDishName || payload.parentDish?.name || '').trim();
+    if (!parentName) {
+      throw new Error('Dish name is required to save recipe costing.');
+    }
+
+    const category = String(payload.parentDish?.category || 'General').trim();
+    const pdRes = await client.query(
+      `INSERT INTO public.parent_dishes (restaurant_id, name, category)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (restaurant_id, name)
+       DO UPDATE SET category = EXCLUDED.category, updated_at = now()
+       RETURNING id;`,
+      [restaurantId, parentName, category]
+    );
+    const parentDishId: string = pdRes.rows[0].id;
+
+    if (payload.parentDish && Array.isArray(payload.parentDish.variants)) {
+      for (const v of payload.parentDish.variants) {
+        if (!v?.rawName) continue;
+        await client.query(
+          `INSERT INTO public.dish_variants (restaurant_id, parent_dish_id, variant_name, raw_pos_item_name, average_selling_price)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (restaurant_id, raw_pos_item_name)
+           DO UPDATE SET
+             parent_dish_id = EXCLUDED.parent_dish_id,
+             variant_name = EXCLUDED.variant_name,
+             average_selling_price = EXCLUDED.average_selling_price,
+             updated_at = now();`,
+          [
+            restaurantId,
+            parentDishId,
+            v.variantName || 'Regular',
+            v.rawName,
+            Number(v.averagePrice) || 0,
+          ]
+        );
+      }
+    }
+
+    if (Array.isArray(payload.groupingRules) && payload.groupingRules.length > 0) {
+      for (const r of payload.groupingRules) {
+        const rawPat = String(r.pattern || r.rawPattern || '').trim();
+        const ruleParent = String(r.parentDishName || '').trim();
+        if (!rawPat || !ruleParent) continue;
+
+        const ruleParentRes = await client.query(
+          `INSERT INTO public.parent_dishes (restaurant_id, name, category)
+           VALUES ($1, $2, 'General')
+           ON CONFLICT (restaurant_id, name) DO UPDATE SET updated_at = now()
+           RETURNING id;`,
+          [restaurantId, ruleParent]
+        );
+        const ruleParentId = ruleParentRes.rows[0].id;
+
+        await client.query(
+          `INSERT INTO public.dish_grouping_rules
+           (restaurant_id, raw_pattern, match_type, parent_dish_id, target_variant_name, confidence_score, is_approved)
+           VALUES ($1, $2, 'EXACT', $3, $4, $5, $6)
+           ON CONFLICT (restaurant_id, raw_pattern)
+           DO UPDATE SET
+             parent_dish_id = EXCLUDED.parent_dish_id,
+             target_variant_name = EXCLUDED.target_variant_name,
+             confidence_score = EXCLUDED.confidence_score,
+             is_approved = EXCLUDED.is_approved;`,
+          [
+            restaurantId,
+            rawPat,
+            ruleParentId,
+            r.variantName || r.targetVariantName || 'Regular',
+            Number(r.confidence) || 100,
+            r.isUserApproved !== undefined ? Boolean(r.isUserApproved) : true,
+          ]
+        );
+      }
+    }
+
+    const ingredients = Array.isArray(rec.ingredients) ? rec.ingredients : [];
+    const ingNameToId = new Map<string, string>();
+    for (const ing of ingredients) {
+      const cleanName = String(ing.name || '').trim();
+      if (!cleanName) continue;
+      const packUnit = normalizeDbMeasurementUnit(ing.purchasePackUnit || ing.unit);
+      const packPrice = Number(ing.purchasePrice ?? ing.directPortionCost ?? 0) || 0;
+      const packSize = Math.max(0.001, Number(ing.purchasePackSize) || 1);
+      const yieldPct = Math.min(100, Math.max(1, Number(ing.yieldPct) || 100));
+
+      const ingRes = await client.query(
+        `INSERT INTO public.ingredients
+         (restaurant_id, name, default_purchase_price, purchase_pack_size, purchase_pack_unit, edible_yield_pct)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (restaurant_id, name)
+         DO UPDATE SET
+           default_purchase_price = EXCLUDED.default_purchase_price,
+           purchase_pack_size = EXCLUDED.purchase_pack_size,
+           purchase_pack_unit = EXCLUDED.purchase_pack_unit,
+           edible_yield_pct = EXCLUDED.edible_yield_pct,
+           updated_at = now()
+         RETURNING id;`,
+        [restaurantId, cleanName, packPrice, packSize, packUnit, yieldPct]
+      );
+      ingNameToId.set(cleanName.toLowerCase(), ingRes.rows[0].id);
+    }
+
+    const isManualOnly =
+      Boolean(rec.isManualCostOnly) ||
+      (ingredients.length === 0 && rec.manualUnitCost !== undefined);
+    const unitCostOverride =
+      rec.manualUnitCost !== undefined && rec.manualUnitCost !== null
+        ? Number(rec.manualUnitCost)
+        : Number(rec.totalVariableCostPerPortion ?? rec.totalIngredientCost ?? 0);
+
+    const canonicalRecipeName = rec.recipeName || `${parentName} Standard BOM`;
+    await client.query(
+      `DELETE FROM public.recipes WHERE restaurant_id = $1 AND parent_dish_id = $2 AND recipe_name <> $3;`,
+      [restaurantId, parentDishId, canonicalRecipeName]
+    );
+
+    const recipeDbRes = await client.query(
+      `INSERT INTO public.recipes
+       (restaurant_id, parent_dish_id, recipe_name, variant_name, batch_yield_servings, packaging_cost_per_portion, cooking_fuel_cost_per_portion, direct_labor_cost_per_portion, other_variable_cost_per_portion, unit_cost_override, is_manual_cost_only, source_pdf_name, bom_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       ON CONFLICT (restaurant_id, parent_dish_id, recipe_name)
+       DO UPDATE SET
+         variant_name = EXCLUDED.variant_name,
+         batch_yield_servings = EXCLUDED.batch_yield_servings,
+         packaging_cost_per_portion = EXCLUDED.packaging_cost_per_portion,
+         cooking_fuel_cost_per_portion = EXCLUDED.cooking_fuel_cost_per_portion,
+         direct_labor_cost_per_portion = EXCLUDED.direct_labor_cost_per_portion,
+         other_variable_cost_per_portion = EXCLUDED.other_variable_cost_per_portion,
+         unit_cost_override = EXCLUDED.unit_cost_override,
+         is_manual_cost_only = EXCLUDED.is_manual_cost_only,
+         source_pdf_name = COALESCE(EXCLUDED.source_pdf_name, public.recipes.source_pdf_name),
+         bom_json = EXCLUDED.bom_json,
+         updated_at = now()
+       RETURNING id;`,
+      [
+        restaurantId,
+        parentDishId,
+        canonicalRecipeName,
+        rec.variantName || 'All Variants',
+        Math.max(1, Number(rec.batchYieldServings) || 1),
+        Number(rec.packagingCost) || 0,
+        Number(rec.cookingFuelCost) || 0,
+        Number(rec.directLaborCost) || 0,
+        Number(rec.otherVariableCost) || 0,
+        unitCostOverride,
+        isManualOnly,
+        rec.sourcePdfName || null,
+        JSON.stringify(ingredients),
+      ]
+    );
+    const recipeId: string = recipeDbRes.rows[0].id;
+
+    await client.query('DELETE FROM public.recipe_ingredients WHERE recipe_id = $1;', [recipeId]);
+
+    const seenIngIds = new Set<string>();
+    for (const ing of ingredients) {
+      const cleanName = String(ing.name || '').trim().toLowerCase();
+      const ingId = ingNameToId.get(cleanName);
+      if (!ingId || seenIngIds.has(ingId)) continue;
+      seenIngIds.add(ingId);
+      await client.query(
+        `INSERT INTO public.recipe_ingredients
+         (recipe_id, ingredient_id, quantity_per_batch, unit, calculated_portion_cost, notes)
+         VALUES ($1, $2, $3, $4, $5, $6);`,
+        [
+          recipeId,
+          ingId,
+          Math.max(0.001, Number(ing.quantity) || 1),
+          normalizeDbMeasurementUnit(ing.unit),
+          Number(ing.calculatedCostPerPortion ?? ing.directPortionCost ?? 0) || 0,
+          ing.notes || null,
+        ]
+      );
+    }
+
+    await client.query('COMMIT');
+    client.release();
+
+    return {
+      success: true,
+      recipeId,
+      parentDishId,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    client.release();
     throw err;
   }
 }

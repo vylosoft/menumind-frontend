@@ -10,6 +10,7 @@ export interface RecipeIngredient {
   purchasePackUnit: MeasurementUnit;
   yieldPct: number; // e.g. 85 for 85% edible yield
   preparationLossPct: number; // e.g. 5 for 5% trim loss
+  directPortionCost?: number; // Direct cost in INR for this recipe quantity when extracted from PDF BOM
   calculatedCostPerPortion: number; // In INR
   notes?: string;
 }
@@ -17,17 +18,20 @@ export interface RecipeIngredient {
 export interface DishRecipe {
   id: string;
   parentDishName: string;
-  variantName: string; // e.g. 'Standard', 'Light', 'Small', 'Large', 'Regular'
+  variantName: string; // e.g. 'All Variants', 'Standard', 'Light', 'Small', 'Large', 'Regular'
   recipeName: string;
   batchYieldServings: number; // default 1 (or 10 for batch recipes)
   ingredients: RecipeIngredient[];
-  totalIngredientCost: number; // sum of calculatedCostPerPortion / batchYield
+  totalIngredientCost: number; // sum of calculatedCostPerPortion / batchYield (or manualUnitCost)
   packagingCost: number;
   cookingFuelCost: number;
   directLaborCost: number;
   otherVariableCost: number;
   platformCommissionRatePct?: number; // Channel-specific commission rate
-  totalVariableCostPerPortion: number; // sum of all variable costs
+  totalVariableCostPerPortion: number; // sum of all variable costs for 1 unit
+  manualUnitCost?: number; // Explicit 1-unit cost entered in Recipe Costing matrix
+  isManualCostOnly?: boolean; // True when cost is set via 1-unit price box without itemized ingredients
+  sourcePdfName?: string; // Original PDF file name if extracted from a Recipe PDF
   lastUpdated?: string;
 }
 

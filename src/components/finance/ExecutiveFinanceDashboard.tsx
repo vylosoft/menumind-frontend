@@ -370,7 +370,15 @@ export const ExecutiveFinanceDashboard: React.FC<ExecutiveFinanceDashboardProps>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+          <table
+            className={`w-full text-left border-collapse text-xs ${
+              currentOutlet === 'banaswadi'
+                ? '[&_tr>*:nth-child(3)]:hidden [&_tr>*:nth-child(4)]:hidden'
+                : currentOutlet === 'whitefield'
+                ? '[&_tr>*:nth-child(2)]:hidden [&_tr>*:nth-child(4)]:hidden'
+                : '[&_tr>*:nth-child(2)]:hidden [&_tr>*:nth-child(3)]:hidden'
+            }`}
+          >
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-600 uppercase font-semibold tracking-wider text-[11px]">
                 <th className="py-3 px-4">Financial Metric</th>

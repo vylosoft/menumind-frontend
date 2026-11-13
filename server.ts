@@ -29,7 +29,7 @@ const argHost = parseArg('--host');
 const HOST = argHost || process.env.HOST || '0.0.0.0';
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 // Server-side Gemini initialization
 let aiClient: GoogleGenAI | null = null;
@@ -47,7 +47,17 @@ function getGenAI(): GoogleGenAI | null {
   return aiClient;
 }
 
-import { testConnection, syncDataToSupabase, loadDataFromSupabase, syncSalesRecordsToSupabase } from './src/server/supabaseClient.ts';
+import {
+  testConnection,
+  syncDataToSupabase,
+  loadDataFromSupabase,
+  syncSalesRecordsToSupabase,
+  saveConfirmedPayoutsToSupabase,
+  deletePayoutFromSupabase,
+  saveAggregatorMappingsToSupabase,
+  saveDishRecipeToSupabase,
+} from './src/server/supabaseClient.ts';
+import { parseRecipeBomFromPdf } from './src/server/recipePdfParser.ts';
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -133,6 +143,8 @@ app.post('/api/supabase/sync', async (req, res) => {
       inventorySnapshots,
       rawRecords,
       payrollSnapshots,
+      payouts,
+      aggregatorMappings,
     } = req.body;
 
     const result = await syncDataToSupabase({
@@ -149,11 +161,115 @@ app.post('/api/supabase/sync', async (req, res) => {
       inventorySnapshots: Array.isArray(inventorySnapshots) ? inventorySnapshots : [],
       rawRecords: Array.isArray(rawRecords) ? rawRecords : undefined,
       payrollSnapshots: Array.isArray(payrollSnapshots) ? payrollSnapshots : undefined,
+      payouts: Array.isArray(payouts) ? payouts : undefined,
+      aggregatorMappings: Array.isArray(aggregatorMappings) ? aggregatorMappings : undefined,
     });
     res.json(result);
   } catch (err: any) {
     console.error('Supabase sync error:', err);
     res.status(500).json({ success: false, error: err.message || 'Failed to sync data to Supabase' });
+  }
+});
+
+// Persist user-confirmed Aggregator Payout Statement(s) directly to Supabase
+app.post('/api/supabase/payouts/save', async (req, res) => {
+  try {
+    const { payouts, mappings, mode, restaurantName } = req.body;
+    if (!Array.isArray(payouts) || payouts.length === 0) {
+      return res.status(400).json({ success: false, error: 'No payout records provided' });
+    }
+    const result = await saveConfirmedPayoutsToSupabase({
+      payouts,
+      mappings: Array.isArray(mappings) ? mappings : undefined,
+      mode: mode === 'edit' ? 'edit' : 'create',
+      restaurantName,
+    });
+    res.json(result);
+  } catch (err: any) {
+    const status = err?.statusCode === 409 ? 409 : 500;
+    if (status !== 409) {
+      console.error('Supabase payout save error:', err);
+    }
+    res.status(status).json({
+      success: false,
+      error: err?.message || 'Failed to persist payout statement to Supabase',
+    });
+  }
+});
+
+// Delete a payout statement from Supabase
+app.delete('/api/supabase/payouts/:id', async (req, res) => {
+  try {
+    const result = await deletePayoutFromSupabase(req.params.id);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Supabase payout delete error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete payout from Supabase' });
+  }
+});
+
+// Persist Aggregator Restaurant ID -> Brand & Outlet Mapping Table to Supabase
+app.post('/api/supabase/aggregator-mappings', async (req, res) => {
+  try {
+    const { mappings } = req.body;
+    if (!Array.isArray(mappings)) {
+      return res.status(400).json({ success: false, error: 'mappings array is required' });
+    }
+    const result = await saveAggregatorMappingsToSupabase(mappings);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Supabase aggregator mappings save error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save mappings to Supabase' });
+  }
+});
+
+// Persist user-confirmed Dish Recipe / BOM / 1-Unit Cost directly to Supabase
+app.post('/api/supabase/recipes/save', async (req, res) => {
+  try {
+    const { recipe, parentDish, groupingRules, restaurantName } = req.body || {};
+    if (!recipe || !recipe.parentDishName) {
+      return res.status(400).json({ success: false, error: 'Valid recipe with parentDishName is required' });
+    }
+    const result = await saveDishRecipeToSupabase({
+      recipe,
+      parentDish,
+      groupingRules: Array.isArray(groupingRules) ? groupingRules : undefined,
+      restaurantName,
+    });
+    res.json(result);
+  } catch (err: any) {
+    console.error('Supabase recipe save error:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to persist dish recipe costing to Supabase',
+    });
+  }
+});
+
+// Parse Recipe Costing / BOM PDF for a specific Dish
+app.post('/api/recipes/parse-pdf', async (req, res) => {
+  try {
+    const { dishName, fileName, pdfBase64 } = req.body || {};
+    if (!pdfBase64 || typeof pdfBase64 !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'PDF file content (pdfBase64) is required.',
+      });
+    }
+    const parsedRecipe = await parseRecipeBomFromPdf({
+      dishName,
+      fileName,
+      pdfBase64,
+      ai: getGenAI(),
+    });
+    res.json({ success: true, parsedRecipe });
+  } catch (err: any) {
+    const status = err?.statusCode === 422 ? 422 : 500;
+    console.error('Error parsing Recipe PDF:', err);
+    res.status(status).json({
+      success: false,
+      error: err?.message || 'Failed to parse Recipe PDF.',
+    });
   }
 });
 
@@ -225,7 +341,7 @@ Please provide a clear, data-backed answer:`;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-4-hydrogen',
           contents: prompt,
           config: {
             systemInstruction,
@@ -280,12 +396,13 @@ app.post('/api/gemini/suggest-grouping', async (req, res) => {
       return res.status(503).json({ error: 'Gemini API key is not configured' });
     }
 
-    const systemInstruction = `You are an expert Indian restaurant menu taxonomist.
-Given a list of raw POS item names from Petpooja, identify the parent dish and the variant for each item.
+    const systemInstruction = `You are an expert Indian & Bengali restaurant menu taxonomist.
+Given a list of raw POS item names from Petpooja, identify the canonical unique parent dish and the variation for each item.
 CRITICAL RULES:
-- Never merge different meats/proteins (e.g., Chicken Biryani and Mutton Biryani MUST NEVER be merged).
+- Never merge different meats/proteins (e.g., Chicken Biryani and Mutton Biryani MUST NEVER be merged; Veg Thali and Fish/Chicken Thali MUST NEVER be merged).
 - Never merge different dishes (e.g., Chicken Biryani and Chicken Fried Rice are distinct; Chicken Roll and Egg Chicken Roll are distinct; Rohu Kalia and Katla Kalia are distinct fish species).
-- Suffixes like Light, Small, Standard, Large, Regular, Half, Full, Mini, Jumbo, 1 Pc, 200g, 400g, Dine-in, Delivery are variants of the parent dish.
+- Resolve POS typos and accompaniment variations into the same unique Parent Dish! For example, "Veg Thali Only Rice" and "Vg Thali 2pc Roti and Rice" MUST both map to parentDish: "Veg Thali" with variants "Only Rice" and "2pc Roti And Rice".
+- Suffixes like Light, Small, Standard, Large, Regular, Half, Full, Mini, Jumbo, 1 Pc, 2pc, 4pc, 200g, 400g, Only Rice, 2pc Roti and Rice, Dine-in, Delivery are variants of the parent dish.
 - Return a valid JSON array of objects with keys:
   "rawName": exact raw item name,
   "parentDish": clean standardized parent dish name,
@@ -297,7 +414,7 @@ CRITICAL RULES:
 ${JSON.stringify(itemNames.slice(0, 50))}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-4-hydrogen',
       contents: prompt,
       config: {
         systemInstruction,

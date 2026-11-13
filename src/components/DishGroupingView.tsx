@@ -22,6 +22,9 @@ import {
   ChevronRight,
   ShieldCheck,
   Info,
+  CheckCircle2,
+  ChefHat,
+  ArrowRight,
 } from 'lucide-react';
 
 interface DishGroupingViewProps {
@@ -32,6 +35,8 @@ interface DishGroupingViewProps {
   rawRecords?: RawSalesRecord[];
   groupingMode?: 'dish' | 'outlet';
   onToggleGroupingMode?: (mode: 'dish' | 'outlet') => void;
+  isGroupingConfirmed?: boolean;
+  onConfirmDishGrouping?: (navigateToRecipeCosting?: boolean) => void;
 }
 
 export const DishGroupingView: React.FC<DishGroupingViewProps> = ({
@@ -42,6 +47,8 @@ export const DishGroupingView: React.FC<DishGroupingViewProps> = ({
   rawRecords = [],
   groupingMode = 'dish',
   onToggleGroupingMode,
+  isGroupingConfirmed = false,
+  onConfirmDishGrouping,
 }) => {
   // If Outlet Grouping mode is active, render the dedicated Outlet Grouping interface
   if (groupingMode === 'outlet') {
@@ -77,6 +84,10 @@ export const DishGroupingView: React.FC<DishGroupingViewProps> = ({
   // AI Suggestion loading state
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+
+  const totalRawVariations = parentDishes.reduce((sum, d) => sum + d.variants.length, 0);
+  const multiVariantDishesCount = parentDishes.filter((d) => d.variants.length > 1).length;
 
   const toggleExpand = (dishId: string) => {
     setExpandedDishIds((prev) => {
@@ -146,14 +157,14 @@ export const DishGroupingView: React.FC<DishGroupingViewProps> = ({
     setIsMergeModalOpen(true);
   };
 
-  const handleExecuteMerge = () => {
+  const handleExecuteMerge = (forceOverride = false) => {
     const sourceDish = parentDishes.find((d) => d.id === sourceDishId);
     const targetDish = parentDishes.find((d) => d.id === targetDishId);
     if (!sourceDish || !targetDish) return;
 
-    if (!canMergeSafely(sourceDish.name, targetDish.name)) {
+    if (!forceOverride && !canMergeSafely(sourceDish.name, targetDish.name)) {
       setMergeWarning(
-        `Safety Guardrail Warning: Merging "${sourceDish.name}" and "${targetDish.name}" involves distinct proteins or incompatible dishes. Are you sure you wish to override?`
+        `Safety Guardrail Warning: Merging "${sourceDish.name}" and "${targetDish.name}" involves distinct proteins or incompatible dishes. Click "Override & Merge" only if intentional.`
       );
       return;
     }
@@ -295,9 +306,10 @@ export const DishGroupingView: React.FC<DishGroupingViewProps> = ({
         if (Array.isArray(imported)) {
           onUpdateRules(imported);
           saveGroupingRules(imported);
+          setAiNotice(`Imported ${imported.length} dish grouping rules from JSON dictionary.`);
         }
-      } catch (err) {
-        alert('Invalid JSON dictionary file');
+      } catch {
+        setAiNotice('Invalid JSON dictionary file. Please upload a valid exported rules array.');
       }
     };
     reader.readAsText(file);
@@ -305,14 +317,73 @@ export const DishGroupingView: React.FC<DishGroupingViewProps> = ({
 
   // Reset to default
   const handleResetToDefaults = () => {
-    if (confirm('Reset custom dish grouping rules to system defaults?')) {
-      onUpdateRules([]);
-      saveGroupingRules([]);
-    }
+    onUpdateRules([]);
+    saveGroupingRules([]);
+    setConfirmingReset(false);
+    setAiNotice('Reset custom dish grouping rules to intelligent POS defaults.');
   };
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      {/* Confirm Dish Grouping & Proceed to Recipe Costing Banner */}
+      {parentDishes.length > 0 && onConfirmDishGrouping && (
+        <div
+          className={`rounded-2xl p-5 border shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+            isGroupingConfirmed
+              ? 'bg-emerald-50/90 border-emerald-300'
+              : 'bg-amber-50/90 border-amber-300'
+          }`}
+        >
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                  isGroupingConfirmed
+                    ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                    : 'bg-amber-100 text-amber-900 border-amber-300'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {isGroupingConfirmed
+                  ? 'Dish Grouping Confirmed for Recipe Costing'
+                  : 'Step 1: Review & Confirm Dish Grouping'}
+              </span>
+              <span className="text-xs font-semibold text-slate-700">
+                {totalRawVariations} POS items consolidated into{' '}
+                <strong className="text-slate-900">{parentDishes.length} Unique Dishes</strong>
+                {multiVariantDishesCount > 0 ? ` (${multiVariantDishesCount} multi-variation groups)` : ''}
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 max-w-3xl">
+              Variations like <em>&ldquo;Veg Thali Only Rice&rdquo;</em> and{' '}
+              <em>&ldquo;Vg Thali 2pc Roti and Rice&rdquo;</em> are grouped under a single unique dish (
+              <strong>Veg Thali</strong>). Once you confirm the grouping below, all{' '}
+              <strong>{parentDishes.length} unique dishes</strong> will populate your{' '}
+              <strong>Recipe Costing &amp; BOM Matrix</strong>.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => onConfirmDishGrouping(false)}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{isGroupingConfirmed ? 'Re-Save Grouping' : 'Confirm Grouping'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onConfirmDishGrouping(true)}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold bg-teal-600 hover:bg-teal-500 text-white shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <ChefHat className="w-3.5 h-3.5" />
+              <span>Confirm &amp; Open Recipe Costing Matrix</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
       {/* Header & Controls */}
       <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -375,13 +446,34 @@ export const DishGroupingView: React.FC<DishGroupingViewProps> = ({
               <input type="file" accept=".json" onChange={handleImportDictionary} className="hidden" />
             </label>
 
-            <button
-              onClick={handleResetToDefaults}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset</span>
-            </button>
+            {confirmingReset ? (
+              <div className="inline-flex items-center gap-1 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1">
+                <span className="text-[11px] font-semibold text-rose-800">Reset rules?</span>
+                <button
+                  type="button"
+                  onClick={handleResetToDefaults}
+                  className="px-2 py-0.5 rounded bg-rose-600 text-white text-[11px] font-bold hover:bg-rose-500"
+                >
+                  Yes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingReset(false)}
+                  className="px-2 py-0.5 rounded bg-white text-slate-600 text-[11px] font-semibold border border-slate-200"
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmingReset(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -656,13 +748,23 @@ export const DishGroupingView: React.FC<DishGroupingViewProps> = ({
               >
                 Cancel
               </button>
-              <button
-                disabled={!targetDishId}
-                onClick={handleExecuteMerge}
-                className="px-4 py-2 rounded-lg text-xs font-bold bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-50 shadow-xs"
-              >
-                Confirm Merge
-              </button>
+              {mergeWarning ? (
+                <button
+                  disabled={!targetDishId}
+                  onClick={() => handleExecuteMerge(true)}
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-50 shadow-xs"
+                >
+                  Override &amp; Merge
+                </button>
+              ) : (
+                <button
+                  disabled={!targetDishId}
+                  onClick={() => handleExecuteMerge(false)}
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-50 shadow-xs"
+                >
+                  Confirm Merge
+                </button>
+              )}
             </div>
           </div>
         </div>

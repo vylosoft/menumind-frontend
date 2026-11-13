@@ -68,10 +68,12 @@ export function detectOutletFromItemAndRow(
         /\b[wW]$/i.test(leftSide) ||
         leftParts[leftParts.length - 1]?.toUpperCase() === 'W';
 
-      // Identify channel from right side
+      // Identify channel from right side (Toing is combined and reported as Swiggy)
       let channel: string | undefined = undefined;
       const lowerRight = rightSide.toLowerCase();
-      if (
+      if (lowerRight.includes('toing')) {
+        channel = 'Swiggy';
+      } else if (
         lowerRight.includes('swiggy') ||
         lowerRight.includes('zomato') ||
         lowerRight.includes('ownly') ||

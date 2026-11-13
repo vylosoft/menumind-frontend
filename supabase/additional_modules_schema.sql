@@ -322,32 +322,75 @@ CREATE TABLE IF NOT EXISTS public.monthly_inventory_snapshots (
 -- ==============================================================================
 -- Reconciles Swiggy, Zomato, Magicpin and Direct Payouts
 
+-- Aggregator Restaurant ID -> Brand & Outlet Location Mapping Table
+CREATE TABLE IF NOT EXISTS public.aggregator_restaurant_mappings (
+    id VARCHAR(100) PRIMARY KEY, -- e.g. 'map-swiggy-762173'
+    restaurant_id UUID NOT NULL REFERENCES public.restaurants(id) ON DELETE CASCADE,
+    platform VARCHAR(30) NOT NULL CHECK (platform IN ('swiggy', 'zomato', 'ownly')),
+    aggregator_restaurant_id VARCHAR(50) NOT NULL,
+    brand_name VARCHAR(120) NOT NULL,
+    outlet_id VARCHAR(50) NOT NULL REFERENCES public.restaurant_outlets(id) ON DELETE RESTRICT,
+    is_default BOOLEAN NOT NULL DEFAULT false,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    UNIQUE (restaurant_id, platform, aggregator_restaurant_id)
+);
+
 CREATE TABLE IF NOT EXISTS public.platform_payout_reconciliation (
-    id VARCHAR(80) PRIMARY KEY, -- e.g. 'PAYOUT-2026-10-SWIGGY-WF'
+    id VARCHAR(140) PRIMARY KEY, -- e.g. 'PAYOUT-SWIGGY-762173-2026-10-...'
     restaurant_id UUID NOT NULL REFERENCES public.restaurants(id) ON DELETE CASCADE,
     outlet_id VARCHAR(50) NOT NULL REFERENCES public.restaurant_outlets(id) ON DELETE RESTRICT,
     month_year VARCHAR(7) NOT NULL, -- 'YYYY-MM'
-    platform VARCHAR(30) NOT NULL CHECK (platform IN ('SWIGGY', 'ZOMATO', 'MAGICPIN', 'DIRECT_ONLINE', 'OTHER')),
+    platform VARCHAR(30) NOT NULL CHECK (platform IN ('SWIGGY', 'ZOMATO', 'OWNLY', 'MAGICPIN', 'DIRECT_ONLINE', 'OTHER')),
+    aggregator_restaurant_id VARCHAR(50),
+    brand_name VARCHAR(120),
+    period_type VARCHAR(20) NOT NULL DEFAULT 'monthly',
+    week_label VARCHAR(100),
+    order_count INTEGER NOT NULL DEFAULT 0,
+    cancelled_orders INTEGER NOT NULL DEFAULT 0,
     gross_sales_reported NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+    packaging_charges NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     customer_discounts_borne NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     net_platform_sales NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
     commission_deducted NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    payment_gateway_fee NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     gst_on_commission NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
     tcs_tds_deducted NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    tds_deducted NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
     cancellation_charges NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
     marketing_ad_deductions NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
-    other_deductions NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    swiggy_assure_fee NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    hyperpure_recovery NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    other_deductions NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    other_charges_breakdown JSONB DEFAULT '[]'::jsonb,
     net_bank_settlement NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
     actual_bank_credit_received NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
     settlement_variance NUMERIC(12, 2) DEFAULT 0.00,
+    direct_sales_cash_upi NUMERIC(14, 2) DEFAULT 0.00,
     settlement_status VARCHAR(30) NOT NULL DEFAULT 'Reconciled' CHECK (
         settlement_status IN ('Reconciled', 'Disputed', 'Pending Bank Credit')
     ),
-    payout_reference_id VARCHAR(100),
+    payout_reference_id VARCHAR(200),
+    file_name VARCHAR(255),
+    file_hash VARCHAR(128),
+    data_fingerprint VARCHAR(255),
+    zomato_breakup_json JSONB,
+    swiggy_breakup_json JSONB,
+    ownly_breakup_json JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    UNIQUE (restaurant_id, outlet_id, month_year, platform)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+
+-- ==============================================================================
+-- 7B. RECIPE COSTING & PDF BOM EXTENSIONS ON public.recipes
+-- ==============================================================================
+ALTER TABLE IF EXISTS public.recipes
+    ADD COLUMN IF NOT EXISTS variant_name TEXT DEFAULT 'All Variants',
+    ADD COLUMN IF NOT EXISTS unit_cost_override NUMERIC(12, 2),
+    ADD COLUMN IF NOT EXISTS is_manual_cost_only BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS source_pdf_name TEXT,
+    ADD COLUMN IF NOT EXISTS bom_json JSONB;
 
 -- ==============================================================================
 -- 8. INDEXES FOR PERFORMANCE & RELATIONAL JOINS
@@ -621,6 +664,31 @@ SELECT
     'whitefield', id, 'WF', 'Whitefield Outlet', 'Bangalore'
 FROM public.restaurants
 ON CONFLICT (id) DO NOTHING;
+
+-- Seed Core 10 Aggregator Restaurant ID -> Brand & Outlet Mappings (Swiggy, Zomato & Ownly)
+INSERT INTO public.aggregator_restaurant_mappings (
+    id, restaurant_id, platform, aggregator_restaurant_id, brand_name, outlet_id, is_default, notes
+)
+SELECT
+    vals.id, r.id, vals.platform, vals.res_id, vals.brand_name, vals.outlet_id, true, vals.notes
+FROM public.restaurants r
+CROSS JOIN (
+    VALUES
+        ('map-swiggy-762173', 'swiggy', '762173', 'Banglar Jhale Jhole', 'banaswadi', 'Swiggy · Banglar Jhale Jhole · Banaswadi'),
+        ('map-swiggy-881519', 'swiggy', '881519', 'Banglar Jhale Jhole', 'whitefield', 'Swiggy · Banglar Jhale Jhole · Whitefield'),
+        ('map-swiggy-1174333', 'swiggy', '1174333', 'Niraamish', 'banaswadi', 'Swiggy · Niraamish · Banaswadi'),
+        ('map-swiggy-1332609', 'swiggy', '1332609', 'Niraamish', 'whitefield', 'Swiggy · Niraamish · Whitefield'),
+        ('map-zomato-20794526', 'zomato', '20794526', 'Banglar Jhale Jhole', 'banaswadi', 'Zomato · Banglar Jhale Jhole · Banaswadi'),
+        ('map-zomato-21176453', 'zomato', '21176453', 'Banglar Jhale Jhole', 'whitefield', 'Zomato · Banglar Jhale Jhole · Whitefield'),
+        ('map-zomato-22042748', 'zomato', '22042748', 'Niraamish', 'banaswadi', 'Zomato · Niraamish · Banaswadi'),
+        ('map-zomato-22550600', 'zomato', '22550600', 'Niraamish', 'whitefield', 'Zomato · Niraamish · Whitefield'),
+        ('map-ownly-RN421127', 'ownly', 'RN421127', 'Banglar Jhale Jhole', 'banaswadi', 'Ownly · Banglar Jhale Jhole · Banaswadi'),
+        ('map-ownly-RN421125', 'ownly', 'RN421125', 'Banglar Jhale Jhole', 'whitefield', 'Ownly · Banglar Jhale Jhole (-W) · Whitefield')
+) AS vals(id, platform, res_id, brand_name, outlet_id, notes)
+ON CONFLICT (restaurant_id, platform, aggregator_restaurant_id) DO UPDATE SET
+    brand_name = EXCLUDED.brand_name,
+    outlet_id = EXCLUDED.outlet_id,
+    updated_at = now();
 
 -- Seed initial 14 operating overhead categories (initialized to ₹0)
 INSERT INTO public.outlet_operating_expenses (

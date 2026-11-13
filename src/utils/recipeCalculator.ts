@@ -13,13 +13,44 @@ import {
 import { ParentDish } from '../types/restaurant';
 
 /**
+ * Normalizes arbitrary measurement unit strings (e.g. from PDF BOMs) into valid MeasurementUnit values
+ */
+export function normalizeMeasurementUnit(raw?: string): MeasurementUnit {
+  const clean = (raw || 'g').toLowerCase().replace(/\./g, '').trim();
+  if (clean === 'kg' || clean === 'kgs' || clean === 'kilogram' || clean === 'kilograms') return 'kg';
+  if (clean === 'g' || clean === 'gm' || clean === 'gms' || clean === 'gram' || clean === 'grams') return 'g';
+  if (clean === 'l' || clean === 'ltr' || clean === 'ltrs' || clean === 'liter' || clean === 'liters') return 'l';
+  if (clean === 'litre' || clean === 'litres') return 'litre';
+  if (clean === 'ml' || clean === 'milliliter' || clean === 'millilitre') return 'ml';
+  if (clean === 'tbsp' || clean === 'tablespoon' || clean === 'tablespoons') return 'tbsp';
+  if (clean === 'tsp' || clean === 'teaspoon' || clean === 'teaspoons') return 'tsp';
+  if (clean === 'pc' || clean === 'pcs') return 'pc';
+  if (
+    clean === 'piece' ||
+    clean === 'pieces' ||
+    clean === 'no' ||
+    clean === 'nos' ||
+    clean === 'unit' ||
+    clean === 'units' ||
+    clean === 'portion' ||
+    clean === 'portions' ||
+    clean === 'plate' ||
+    clean === 'pkt' ||
+    clean === 'pack'
+  ) {
+    return 'piece';
+  }
+  return 'g';
+}
+
+/**
  * Standardizes units into a common base unit for accurate math:
  * - 'g' & 'kg' -> 'g'
  * - 'ml' & 'l'/'litre' -> 'ml'
  * - 'piece'/'pc' -> 'piece'
  */
 export function convertToBaseUnit(qty: number, unit: MeasurementUnit): { baseQty: number; baseType: 'weight' | 'volume' | 'count' } {
-  const norm = unit.toLowerCase();
+  const norm = (unit || 'g').toLowerCase();
   if (norm === 'kg') return { baseQty: qty * 1000, baseType: 'weight' };
   if (norm === 'g') return { baseQty: qty, baseType: 'weight' };
   if (norm === 'l' || norm === 'litre') return { baseQty: qty * 1000, baseType: 'volume' };
@@ -30,13 +61,36 @@ export function convertToBaseUnit(qty: number, unit: MeasurementUnit): { baseQty
 }
 
 /**
- * Calculates exact portion cost for an ingredient taking pack size, edible yield, and prep loss into account
+ * Calculates exact portion cost for an ingredient taking pack size, edible yield, prep loss,
+ * or direct PDF-extracted portion cost into account
  */
 export function calculateIngredientPortionCost(ing: Omit<RecipeIngredient, 'id' | 'calculatedCostPerPortion'>): number {
+  if (
+    typeof ing.directPortionCost === 'number' &&
+    !Number.isNaN(ing.directPortionCost) &&
+    ing.directPortionCost >= 0 &&
+    (!ing.purchasePrice || ing.purchasePrice <= 0)
+  ) {
+    return Math.round(ing.directPortionCost * 100) / 100;
+  }
+
   const portion = convertToBaseUnit(ing.quantity, ing.unit);
   const pack = convertToBaseUnit(ing.purchasePackSize, ing.purchasePackUnit);
 
-  if (pack.baseQty <= 0) return 0;
+  if (pack.baseQty <= 0) {
+    return typeof ing.directPortionCost === 'number' && ing.directPortionCost > 0
+      ? Math.round(ing.directPortionCost * 100) / 100
+      : 0;
+  }
+
+  // If unit families differ (e.g. grams vs piece in an unstructured table), avoid 1000x unit distortion
+  if (portion.baseType !== pack.baseType) {
+    if (typeof ing.directPortionCost === 'number' && ing.directPortionCost > 0) {
+      return Math.round(ing.directPortionCost * 100) / 100;
+    }
+    const fallbackRatio = ing.purchasePackSize > 0 ? ing.quantity / ing.purchasePackSize : 1;
+    return Math.round(fallbackRatio * ing.purchasePrice * 100) / 100;
+  }
 
   // Cost per base unit (e.g. per gram or per ml)
   const costPerBaseUnit = ing.purchasePrice / pack.baseQty;
@@ -54,9 +108,30 @@ export function calculateIngredientPortionCost(ing: Omit<RecipeIngredient, 'id' 
 }
 
 /**
- * Recalculates total recipe cost per portion
+ * Recalculates total recipe cost per portion (supports both itemized BOM and manual 1-unit cost)
  */
 export function computeRecipeTotalCost(recipe: DishRecipe): DishRecipe {
+  if (
+    recipe.ingredients.length === 0 &&
+    typeof recipe.manualUnitCost === 'number' &&
+    !Number.isNaN(recipe.manualUnitCost) &&
+    recipe.manualUnitCost >= 0
+  ) {
+    const manualBase = Math.round(recipe.manualUnitCost * 100) / 100;
+    const totalVariable =
+      manualBase +
+      (recipe.packagingCost || 0) +
+      (recipe.cookingFuelCost || 0) +
+      (recipe.directLaborCost || 0) +
+      (recipe.otherVariableCost || 0);
+    return {
+      ...recipe,
+      isManualCostOnly: true,
+      totalIngredientCost: manualBase,
+      totalVariableCostPerPortion: Math.round(totalVariable * 100) / 100,
+    };
+  }
+
   const batchYield = recipe.batchYieldServings > 0 ? recipe.batchYieldServings : 1;
 
   let totalIngredientCost = 0;
@@ -72,13 +147,14 @@ export function computeRecipeTotalCost(recipe: DishRecipe): DishRecipe {
   const ingredientCostPerPortion = totalIngredientCost / batchYield;
   const totalVariable =
     ingredientCostPerPortion +
-    recipe.packagingCost +
-    recipe.cookingFuelCost +
-    recipe.directLaborCost +
-    recipe.otherVariableCost;
+    (recipe.packagingCost || 0) +
+    (recipe.cookingFuelCost || 0) +
+    (recipe.directLaborCost || 0) +
+    (recipe.otherVariableCost || 0);
 
   return {
     ...recipe,
+    isManualCostOnly: false,
     ingredients: updatedIngredients,
     totalIngredientCost: Math.round(ingredientCostPerPortion * 100) / 100,
     totalVariableCostPerPortion: Math.round(totalVariable * 100) / 100,
@@ -86,7 +162,7 @@ export function computeRecipeTotalCost(recipe: DishRecipe): DishRecipe {
 }
 
 /**
- * Connects Petpooja Sales Parent Dishes with Variant-Level Recipes and calculates
+ * Connects Petpooja Sales Parent Dishes with Dish/Variant-Level Recipes and calculates
  * exact contribution margins deterministically.
  */
 export function calculateParentProfitMetrics(
@@ -109,20 +185,33 @@ export function calculateParentProfitMetrics(
   let grandTotalVariableCost = 0;
   let grandTotalContribution = 0;
 
-  // Recipe lookup map: key = `${parentName.toLowerCase()}||${variantName.toLowerCase()}`
+  // Recipe lookup map: exact variant key + parent dish fallback (for grouped unique dish costing)
   const recipeMap = new Map<string, DishRecipe>();
+  const parentFallbackRecipeMap = new Map<string, DishRecipe>();
   recipes.forEach((r) => {
-    const key = `${r.parentDishName.toLowerCase().trim()}||${r.variantName.toLowerCase().trim()}`;
-    recipeMap.set(key, r);
+    const pKey = r.parentDishName.toLowerCase().trim();
+    const vKey = r.variantName.toLowerCase().trim();
+    recipeMap.set(`${pKey}||${vKey}`, r);
+
+    const existingFallback = parentFallbackRecipeMap.get(pKey);
+    if (
+      !existingFallback ||
+      vKey === 'all variants' ||
+      vKey === 'standard' ||
+      vKey === 'regular'
+    ) {
+      parentFallbackRecipeMap.set(pKey, r);
+    }
   });
 
   const parentMetrics: ParentProfitMetrics[] = parentDishes.map((parent) => {
     let parentVariableCost = 0;
     let parentContribution = 0;
+    const parentKey = parent.name.toLowerCase().trim();
 
     const variantMetrics: VariantProfitMetrics[] = parent.variants.map((v) => {
-      const key = `${parent.name.toLowerCase().trim()}||${v.variantName.toLowerCase().trim()}`;
-      const matchedRecipe = recipeMap.get(key);
+      const key = `${parentKey}||${v.variantName.toLowerCase().trim()}`;
+      const matchedRecipe = recipeMap.get(key) || parentFallbackRecipeMap.get(parentKey);
 
       // Determine variable cost per portion
       let totalVarCost = 0;
@@ -143,6 +232,11 @@ export function calculateParentProfitMetrics(
         ingCost = v.unitCost * 0.75;
         pkgCost = v.unitCost * 0.15;
         otherCost = v.unitCost * 0.1;
+      } else if (parent.unitCost !== undefined && parent.unitCost > 0) {
+        totalVarCost = parent.unitCost;
+        ingCost = parent.unitCost * 0.85;
+        pkgCost = parent.unitCost * 0.1;
+        otherCost = parent.unitCost * 0.05;
       } else {
         // Fallback estimated cost based on selling price
         totalVarCost = (v.averagePrice * fallbackFoodCostPct) / 100;

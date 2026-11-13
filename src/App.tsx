@@ -1,6 +1,6 @@
 import { appUrl } from './lib/appUrl';
 import React, { useState, useMemo, useEffect } from 'react';
-import { posSalesApi, payoutsApi } from './lib/ingestionApi';
+import { posSalesApi } from './lib/ingestionApi';
 import {
   GroupingRule,
   ParentDish,
@@ -24,7 +24,14 @@ import {
 import { mergeSalesRecords } from './utils/petpoojaParser';
 import { aggregateSalesByParentDish } from './utils/salesAggregator';
 import { generateDemandForecasts } from './utils/forecastingEngine';
-import { getSavedGroupingRules, saveGroupingRules } from './utils/dishNormalizer';
+import {
+  getSavedGroupingRules,
+  saveGroupingRules,
+  getSavedDishGroupingConfirmed,
+  saveDishGroupingConfirmed,
+  getSavedRecipesFromStorage,
+  saveRecipesToStorage,
+} from './utils/dishNormalizer';
 import { exportFullExcelReport } from './utils/exportHelpers';
 
 // Layout & View Components
@@ -79,6 +86,10 @@ import {
 } from './utils/operatingOverheadManager';
 import { PlatformPayoutRecord } from './types/finance';
 import { getSavedPayouts, savePayouts } from './utils/payoutManager';
+import {
+  mergeWithDefaultMappings,
+  saveAggregatorMappings,
+} from './utils/aggregatorMappingManager';
 
 const EMPTY_RECONCILIATION: ReconciliationReport = {
   totalFiles: 0,
@@ -114,8 +125,21 @@ export default function App() {
   // Grouping view mode: 'dish' (standard Dish Grouping for Highest Selling) vs 'outlet' (Outlet Grouping for Item-wise Sales with trailing 'W')
   const [groupingMode, setGroupingMode] = useState<'dish' | 'outlet'>('dish');
 
-  // Recipe costing, fixed overhead & commodities state (clean start)
-  const [recipes, setRecipes] = useState<DishRecipe[]>([]);
+  // Track whether user has confirmed Dish Grouping for Recipe Costing & BOM
+  const [isDishGroupingConfirmed, setIsDishGroupingConfirmed] = useState<boolean>(() => {
+    return getSavedDishGroupingConfirmed();
+  });
+
+  // Recipe costing, fixed overhead & commodities state (persisted in localStorage & Supabase)
+  const [recipes, setRecipes] = useState<DishRecipe[]>(() => {
+    return getSavedRecipesFromStorage<DishRecipe>();
+  });
+
+  const handleUpdateRecipes = (updated: DishRecipe[]) => {
+    setRecipes(updated);
+    saveRecipesToStorage(updated);
+  };
+
   const [fixedCosts, setFixedCosts] = useState<FixedOperatingCosts>(DEFAULT_FIXED_OPERATING_COSTS);
   const [watchlist, setWatchlist] = useState<IngredientPriceWatch[]>(COMMODITY_WATCHLIST);
 
@@ -254,16 +278,40 @@ export default function App() {
           handleUpdateInventorySnapshots(cloud.inventorySnapshots);
         }
 
-        // 5. Dish Grouping Rules & Fixed Costs
+        // 5. Dish Grouping Rules, Recipes & Fixed Costs
         if (Array.isArray(cloud.groupingRules) && cloud.groupingRules.length > 0) {
-          handleUpdateRules(cloud.groupingRules);
+          setGroupingRules(cloud.groupingRules);
+          saveGroupingRules(cloud.groupingRules);
+          setIsDishGroupingConfirmed(true);
+          saveDishGroupingConfirmed(true);
+        }
+        if (Array.isArray(cloud.recipes) && cloud.recipes.length > 0) {
+          handleUpdateRecipes(cloud.recipes);
         }
         if (cloud.fixedCosts) {
           setFixedCosts(cloud.fixedCosts);
         }
 
-        if (staffCount > 0) {
-          showToast(`Retrieved ${staffCount} staff members & October wages from Supabase!`);
+        // 6. Platform Payouts & Aggregator Restaurant ID Mappings
+        if (Array.isArray(cloud.payouts) && cloud.payouts.length > 0) {
+          handleUpdatePayouts(cloud.payouts);
+        }
+        if (Array.isArray(cloud.aggregatorMappings) && cloud.aggregatorMappings.length > 0) {
+          saveAggregatorMappings(mergeWithDefaultMappings(cloud.aggregatorMappings));
+        }
+
+        // 7. POS Sales Records
+        if (Array.isArray(cloud.rawRecords) && cloud.rawRecords.length > 0) {
+          setRawRecords(cloud.rawRecords);
+          if (cloud.reconciliation) {
+            setReconciliation(cloud.reconciliation);
+          }
+        }
+
+        if (staffCount > 0 || (cloud.payouts?.length || 0) > 0) {
+          showToast(
+            `Synchronized ${staffCount} staff & ${cloud.payouts?.length || 0} payout statements from Supabase!`
+          );
         }
       } catch (err) {
         console.warn('Initial Supabase auto-pull skipped (offline or initial boot):', err);
@@ -296,21 +344,21 @@ export default function App() {
       const records = await posSalesApi.fetchAllRecords();
       if (records.length > 0) applyStoredSales(records);
     } catch (err: any) {
-      showToast(`Could not reload saved sales: ${err?.message || 'unknown error'}`);
+      if (err?.status && err.status !== 0) {
+        showToast(`Could not reload saved sales: ${err?.message || 'unknown error'}`);
+      }
     }
   };
 
-  // Hydrate POS sales & platform payouts from the MenuMind API (database is the source of truth)
+  // Hydrate POS sales & platform payouts from the MenuMind API if running
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [records, storedPayouts] = await Promise.all([
-          posSalesApi.fetchAllRecords(),
-          payoutsApi.fetchAll(),
-        ]);
+        // Payout statements are loaded from Supabase by the brand-aware pull above (server.ts);
+        // the API only supplies the saved Petpooja POS rows here, so the two never overwrite each other.
+        const records = await posSalesApi.fetchAllRecords();
         if (cancelled) return;
-        handleUpdatePayouts(storedPayouts);
         if (records.length > 0) {
           const { mergedRecords, reconciliation: rec } = mergeSalesRecords(
             Object.entries(
@@ -325,7 +373,9 @@ export default function App() {
           setGroupingMode(rec.hasOutletGrouping ? 'outlet' : 'dish');
         }
       } catch (err: any) {
-        if (!cancelled) showToast(`Could not load saved uploads: ${err?.message || 'unknown error'}`);
+        if (!cancelled && err?.status && err.status !== 0) {
+          showToast(`Could not load saved uploads: ${err?.message || 'unknown error'}`);
+        }
       }
     })();
     return () => {
@@ -360,14 +410,32 @@ export default function App() {
           handleUpdateInventorySnapshots(cloud.inventorySnapshots);
         }
         if (Array.isArray(cloud.groupingRules) && cloud.groupingRules.length > 0) {
-          handleUpdateRules(cloud.groupingRules);
+          setGroupingRules(cloud.groupingRules);
+          saveGroupingRules(cloud.groupingRules);
+          setIsDishGroupingConfirmed(true);
+          saveDishGroupingConfirmed(true);
+        }
+        if (Array.isArray(cloud.recipes) && cloud.recipes.length > 0) {
+          handleUpdateRecipes(cloud.recipes);
         }
         if (cloud.fixedCosts) {
           setFixedCosts(cloud.fixedCosts);
         }
+        if (Array.isArray(cloud.payouts) && cloud.payouts.length > 0) {
+          handleUpdatePayouts(cloud.payouts);
+        }
+        if (Array.isArray(cloud.aggregatorMappings) && cloud.aggregatorMappings.length > 0) {
+          saveAggregatorMappings(mergeWithDefaultMappings(cloud.aggregatorMappings));
+        }
+        if (Array.isArray(cloud.rawRecords) && cloud.rawRecords.length > 0) {
+          setRawRecords(cloud.rawRecords);
+          if (cloud.reconciliation) {
+            setReconciliation(cloud.reconciliation);
+          }
+        }
         showToast(
           staffCount > 0
-            ? `Successfully retrieved ${staffCount} staff members with October wages from Supabase!`
+            ? `Successfully retrieved ${staffCount} staff members & payouts from Supabase!`
             : 'Synchronized with Supabase tables!'
         );
       } else {
@@ -377,6 +445,20 @@ export default function App() {
       showToast(`Error retrieving from Supabase: ${e.message}`);
     }
   };
+
+  // Merge confirmed recipe unit costs with explicit costOverrides so all modules stay in sync
+  const effectiveCostOverrides = useMemo(() => {
+    const combined: Record<string, any> = { ...costOverrides };
+    recipes.forEach((r) => {
+      if (r.parentDishName && r.totalVariableCostPerPortion >= 0) {
+        combined[r.parentDishName] = {
+          ...(combined[r.parentDishName] || {}),
+          unitCost: r.totalVariableCostPerPortion,
+        };
+      }
+    });
+    return combined;
+  }, [costOverrides, recipes]);
 
   // Aggregated data derivation
   const {
@@ -389,9 +471,9 @@ export default function App() {
   } = useMemo(() => {
     return aggregateSalesByParentDish(rawRecords, groupingRules, {
       stripPrefixes: true,
-      costOverrides,
+      costOverrides: effectiveCostOverrides,
     });
-  }, [rawRecords, groupingRules, costOverrides]);
+  }, [rawRecords, groupingRules, effectiveCostOverrides]);
 
   // Forecasts derivation
   const forecasts = useMemo(() => {
@@ -418,6 +500,11 @@ export default function App() {
     // Switch to 'dish' (Dish Grouping Review).
     const isOutlet = uploadType === 'outlet' || Boolean(newReconciliation.hasOutletGrouping);
     setGroupingMode(isOutlet ? 'outlet' : 'dish');
+    if (!isOutlet) {
+      // Require user to review & confirm Dish Grouping for newly uploaded Highest Selling items
+      setIsDishGroupingConfirmed(false);
+      saveDishGroupingConfirmed(false);
+    }
     setCurrentTab('grouping'); // Move to grouping review next as required
 
     if (isOutlet) {
@@ -426,7 +513,7 @@ export default function App() {
       );
     } else {
       showToast(
-        `Successfully processed ${newRecords.length} sales rows! Review dish groupings below.`
+        `Processed ${newRecords.length} POS rows! Confirm Dish Grouping below to unlock Recipe Costing.`
       );
     }
 
@@ -443,12 +530,14 @@ export default function App() {
     ]);
     setRawRecords(demo);
     setReconciliation(rec);
-    setRecipes(DEFAULT_RECIPES);
+    handleUpdateRecipes(DEFAULT_RECIPES);
     setCostOverrides(DEMO_COST_PRESETS);
     setCateringOrders(DEMO_CATERING_ORDERS);
     setStaffDirectory(INITIAL_STAFF_DIRECTORY);
     setPurchases(DEMO_PURCHASES_DATASET);
     setInventorySnapshots(DEMO_INVENTORY_SNAPSHOTS);
+    setIsDishGroupingConfirmed(true);
+    saveDishGroupingConfirmed(true);
     setIsDemoLoaded(true);
     showToast('Loaded 6-Month Petpooja Demo Dataset with recipe costing, catering & purchases!');
   };
@@ -467,6 +556,8 @@ export default function App() {
       localStorage.removeItem('menumind_platform_payouts_v1');
       localStorage.removeItem('menumind_platform_payouts_v2');
       localStorage.removeItem('menumind_grouping_rules_v1');
+      localStorage.removeItem('menumind_dish_grouping_rules_v1');
+      localStorage.removeItem('menumind_dish_grouping_confirmed_v1');
       localStorage.removeItem('menumind_recipes_v1');
       localStorage.removeItem('menumind_outlet_overheads_v1');
     } catch (e) {}
@@ -475,6 +566,8 @@ export default function App() {
     setPayouts([]);
     setReconciliation(EMPTY_RECONCILIATION);
     setRecipes([]);
+    setGroupingRules([]);
+    setIsDishGroupingConfirmed(false);
     setCostOverrides({});
     setCateringOrders([]);
     setStaffDirectory([]);
@@ -489,6 +582,60 @@ export default function App() {
     setGroupingRules(newRules);
     saveGroupingRules(newRules);
     showToast('Updated dish grouping rules and re-aggregated menu metrics.');
+  };
+
+  // Lock & confirm unique Parent Dishes + variations for Recipe Costing & persist to Supabase
+  const handleConfirmDishGrouping = (navigateToRecipeCosting = false) => {
+    const lockedRules = [...groupingRules];
+    parentDishes.forEach((dish) => {
+      dish.variants.forEach((v) => {
+        const existingIdx = lockedRules.findIndex(
+          (r) => r.pattern.toLowerCase().trim() === v.rawName.toLowerCase().trim()
+        );
+        if (existingIdx >= 0) {
+          lockedRules[existingIdx] = {
+            ...lockedRules[existingIdx],
+            parentDishName: dish.name,
+            variantName: v.variantName,
+            isUserApproved: true,
+          };
+        } else {
+          lockedRules.push({
+            id: `rule-conf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            pattern: v.rawName,
+            parentDishName: dish.name,
+            variantName: v.variantName,
+            isUserApproved: true,
+            confidence: 100,
+            matchType: 'manual',
+          });
+        }
+      });
+    });
+
+    setGroupingRules(lockedRules);
+    saveGroupingRules(lockedRules);
+    setIsDishGroupingConfirmed(true);
+    saveDishGroupingConfirmed(true);
+
+    // Sync confirmed unique dishes & grouping rules to Supabase in background
+    void fetch(appUrl('/api/supabase/sync'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        restaurantName: 'MenuMind Grand Dining',
+        parentDishes,
+        groupingRules: lockedRules,
+        recipes,
+      }),
+    }).catch(() => {});
+
+    if (navigateToRecipeCosting) {
+      setCurrentTab('recipe-costing');
+    }
+    showToast(
+      `Confirmed ${parentDishes.length} unique dishes for Recipe Costing & BOM!`
+    );
   };
 
   const handleExportExcel = () => {
@@ -608,9 +755,13 @@ export default function App() {
             <RecipeCostingView
               recipes={recipes}
               parentDishes={parentDishes}
+              groupingRules={groupingRules}
+              isDishGroupingConfirmed={isDishGroupingConfirmed}
+              onConfirmDishGrouping={handleConfirmDishGrouping}
+              onUpdateRules={handleUpdateRules}
+              onNavigateTab={(tab) => setCurrentTab(tab as NavTab)}
               onUpdateRecipes={(updated) => {
-                setRecipes(updated);
-                showToast('Updated recipe Bill of Materials and unit costs.');
+                handleUpdateRecipes(updated);
               }}
             />
           )}
@@ -685,6 +836,8 @@ export default function App() {
               rawRecords={rawRecords}
               groupingMode={groupingMode}
               onToggleGroupingMode={setGroupingMode}
+              isGroupingConfirmed={isDishGroupingConfirmed}
+              onConfirmDishGrouping={handleConfirmDishGrouping}
             />
           )}
 
@@ -807,11 +960,20 @@ export default function App() {
           if (Array.isArray(cloudData.payouts) && cloudData.payouts.length > 0) {
             handleUpdatePayouts(cloudData.payouts);
           }
+          if (Array.isArray(cloudData.aggregatorMappings) && cloudData.aggregatorMappings.length > 0) {
+            saveAggregatorMappings(mergeWithDefaultMappings(cloudData.aggregatorMappings));
+          }
           if (Array.isArray(cloudData.inventorySnapshots) && cloudData.inventorySnapshots.length > 0) {
             handleUpdateInventorySnapshots(cloudData.inventorySnapshots);
           }
           if (Array.isArray(cloudData.groupingRules) && cloudData.groupingRules.length > 0) {
-            handleUpdateRules(cloudData.groupingRules);
+            setGroupingRules(cloudData.groupingRules);
+            saveGroupingRules(cloudData.groupingRules);
+            setIsDishGroupingConfirmed(true);
+            saveDishGroupingConfirmed(true);
+          }
+          if (Array.isArray(cloudData.recipes) && cloudData.recipes.length > 0) {
+            handleUpdateRecipes(cloudData.recipes);
           }
           if (cloudData.fixedCosts) {
             setFixedCosts(cloudData.fixedCosts);
