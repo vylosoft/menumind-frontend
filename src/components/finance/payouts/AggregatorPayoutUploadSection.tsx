@@ -293,8 +293,12 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
   const noPos = (c: { channel: string; posOrders: number; posGrossSales: number }) =>
     c.channel !== 'direct' && !(c.posOrders > 0) && !(c.posGrossSales > 0);
 
+  // Statement covers clearly fewer orders than POS (e.g. only one restaurant ID uploaded)
+  const partialStatement = (c: { channel: string; payoutGrossSales: number; payoutOrders: number; posOrders: number }) =>
+    !noStatement(c) && c.channel !== 'direct' && c.posOrders > 0 && c.payoutOrders < c.posOrders * 0.9;
+
   const reconciledAggregatorRows = channelMatchReport.channelReports.filter(
-    (c) => c.channel !== 'direct' && !noStatement(c) && !noPos(c)
+    (c) => c.channel !== 'direct' && !noStatement(c) && !noPos(c) && !partialStatement(c)
   );
   const coveredVariance = reconciledAggregatorRows.reduce((s, c) => s + c.varianceGross, 0);
   const rowsNetCredited = channelMatchReport.channelReports.reduce((s, c) => s + c.payoutNetCredited, 0);
@@ -303,7 +307,7 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
     0
   );
   const hasMissingStatementsWherePosExists = channelMatchReport.channelReports.some(
-    (c) => c.channel !== 'direct' && c.posGrossSales > 0 && noStatement(c)
+    (c) => c.channel !== 'direct' && c.posGrossSales > 0 && (noStatement(c) || partialStatement(c))
   );
 
   // Headline Calculations
@@ -892,6 +896,7 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
               {channelMatchReport.channelReports.map((c) => {
                 const missingStmt = noStatement(c);
                 const missingPos = noPos(c);
+                const partial = partialStatement(c);
                 return (
                   <tr key={c.channel} className="hover:bg-slate-50/70 transition-colors align-top">
                     <td className="py-3.5 px-4 font-bold text-slate-900">
@@ -976,7 +981,7 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                     </td>
 
                     <td className="py-3.5 px-3 text-right font-mono font-semibold">
-                      {missingStmt || missingPos ? (
+                      {missingStmt || missingPos || partial ? (
                         <span className="text-slate-400">—</span>
                       ) : (
                         <div>
@@ -1020,6 +1025,13 @@ export const AggregatorPayoutUploadSection: React.FC<AggregatorPayoutUploadSecti
                           title="Payout statement saved! Upload Petpooja POS sales report to compare."
                         >
                           Payout Saved · Awaiting POS
+                        </span>
+                      ) : partial ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200"
+                          title="Statement covers only some restaurant IDs. Upload the remaining statements to reconcile."
+                        >
+                          Partial: {c.payoutOrders}/{c.posOrders} orders
                         </span>
                       ) : (
                         <span
