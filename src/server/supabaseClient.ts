@@ -1,4 +1,8 @@
 import pg from 'pg';
+import {
+  applyZomatoBreakupToPayoutRecord,
+  ensureZomatoBreakupModelOnRecord,
+} from '../utils/zomatoPayoutModel';
 const { Pool } = pg;
 
 // Supabase Connection Configuration
@@ -531,10 +535,18 @@ function mapDbRowToPlatformPayout(r: any) {
     }
   }
 
-  return {
+  const resolvedDeliveryCharges =
+    Number(zomatoBreakup?.row3_selfLogisticsDeliveryCharge?.total || 0) +
+    Number(zomatoBreakup?.row6_brandPackSubscriptionFee?.total || 0) +
+    Number(zomatoBreakup?.deliveryChargeCollected || 0);
+
+  const baseMapped = {
     id: r.id,
-    outletId: r.outlet_id === 'whitefield' ? 'whitefield' : 'banaswadi',
-    platform: (['swiggy', 'zomato', 'ownly'].includes(platformNorm) ? platformNorm : 'swiggy') as 'swiggy' | 'zomato' | 'ownly',
+    outletId: (r.outlet_id === 'whitefield' ? 'whitefield' : 'banaswadi') as 'banaswadi' | 'whitefield',
+    platform: (['swiggy', 'zomato', 'ownly'].includes(platformNorm) ? platformNorm : 'swiggy') as
+      | 'swiggy'
+      | 'zomato'
+      | 'ownly',
     month: r.month_year,
     accountId: r.aggregator_restaurant_id || undefined,
     accountName: r.brand_name || undefined,
@@ -547,7 +559,7 @@ function mapDbRowToPlatformPayout(r: any) {
     commissionRate: grossSales > 0 ? Math.round((commissionAmount / grossSales) * 10000) / 100 : 0,
     commissionAmount,
     paymentGatewayFee: Number(r.payment_gateway_fee) || 0,
-    deliveryChargesCollected: Number(zomatoBreakup?.deliveryChargeCollected) || 0,
+    deliveryChargesCollected: resolvedDeliveryCharges,
     customerDeliveryFeeShare: 0,
     advertisingSpend: Number(r.marketing_ad_deductions) || 0,
     cancellationCharges: Number(r.cancellation_charges) || 0,
@@ -589,6 +601,13 @@ function mapDbRowToPlatformPayout(r: any) {
     ownlyBreakup,
     payoutDate: r.updated_at ? new Date(r.updated_at).toISOString().slice(0, 10) : undefined,
   };
+
+  if (baseMapped.platform === 'zomato') {
+    const canonicalZb = ensureZomatoBreakupModelOnRecord(baseMapped as any);
+    return applyZomatoBreakupToPayoutRecord(baseMapped as any, canonicalZb);
+  }
+
+  return baseMapped;
 }
 
 export async function syncDataToSupabase(payload: SyncPayload): Promise<{

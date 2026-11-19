@@ -608,14 +608,33 @@ export const PayoutReviewModal: React.FC<PayoutReviewModalProps> = ({
 
   const updateZomatoBreakup = (
     updater: (prevModel: ZomatoPayoutBreakupModel) => ZomatoPayoutBreakupModel,
-    syncReported = false
+    syncReported = false,
+    clearReportedSectionSnapshots = false
   ) => {
     setDrafts((prev) =>
       prev.map((item, idx) => {
         if (idx !== activeIndex) return item;
         const baseModel = item.zomatoBreakup || ensureZomatoBreakupModelOnRecord(item);
-        const nextModel = updater(baseModel);
-        const applied = applyZomatoBreakupToPayoutRecord(item, nextModel, syncReported);
+        const updatedRaw = updater(baseModel);
+        const nextModel: ZomatoPayoutBreakupModel = clearReportedSectionSnapshots
+          ? {
+              ...updatedRaw,
+              reportedSectionA: undefined,
+              reportedSectionB: undefined,
+              reportedSectionC: undefined,
+              reportedSectionD: undefined,
+              reportedSectionE: undefined,
+              reportedRow21: undefined,
+              reportedSectionF: undefined,
+              reportedSectionG: undefined,
+              reportedSectionH: undefined,
+              reportedSectionI: undefined,
+              reportedSectionJ: undefined,
+            }
+          : updatedRaw;
+        const applied = applyZomatoBreakupToPayoutRecord(item, nextModel, syncReported, {
+          alignSubCentWithReported: !clearReportedSectionSnapshots,
+        });
         return recalculatePayoutRecord(applied, syncReported);
       })
     );
@@ -825,10 +844,14 @@ export const PayoutReviewModal: React.FC<PayoutReviewModalProps> = ({
   ) => {
     const parsed = rawVal === '' || rawVal === '-' ? 0 : parseFloat(rawVal);
     const num = Number.isFinite(parsed) ? parsed : 0;
-    updateZomatoBreakup((prevModel) => ({
-      ...prevModel,
-      [field]: updateTripletColumn(prevModel[field], col, num, isInteger),
-    }));
+    updateZomatoBreakup(
+      (prevModel) => ({
+        ...prevModel,
+        [field]: updateTripletColumn(prevModel[field], col, num, isInteger),
+      }),
+      false,
+      true
+    );
   };
 
   const handleZomatoReportedPayoutChange = (rawVal: string) => {
@@ -847,10 +870,14 @@ export const PayoutReviewModal: React.FC<PayoutReviewModalProps> = ({
       label: target === 'extraAdditions' ? 'Additional Credit / Rebate' : 'Additional Deduction',
       values: zeroTriplet(),
     };
-    updateZomatoBreakup((prevModel) => ({
-      ...prevModel,
-      [target]: [...(prevModel[target] || []), newItem],
-    }));
+    updateZomatoBreakup(
+      (prevModel) => ({
+        ...prevModel,
+        [target]: [...(prevModel[target] || []), newItem],
+      }),
+      false,
+      true
+    );
   };
 
   const handleUpdateExtraZomatoLine = (
@@ -858,34 +885,43 @@ export const PayoutReviewModal: React.FC<PayoutReviewModalProps> = ({
     itemId: string,
     patch: { label?: string; col?: 'delivered' | 'cancelled' | 'total'; rawVal?: string }
   ) => {
-    updateZomatoBreakup((prevModel) => ({
-      ...prevModel,
-      [target]: (prevModel[target] || []).map((it) => {
-        if (it.id !== itemId) return it;
-        if (patch.label !== undefined) {
-          return { ...it, label: patch.label };
-        }
-        if (patch.col && patch.rawVal !== undefined) {
-          const parsed = patch.rawVal === '' || patch.rawVal === '-' ? 0 : parseFloat(patch.rawVal);
-          const num = Number.isFinite(parsed) ? parsed : 0;
-          return {
-            ...it,
-            values: updateTripletColumn(it.values, patch.col, num),
-          };
-        }
-        return it;
+    updateZomatoBreakup(
+      (prevModel) => ({
+        ...prevModel,
+        [target]: (prevModel[target] || []).map((it) => {
+          if (it.id !== itemId) return it;
+          if (patch.label !== undefined) {
+            return { ...it, label: patch.label };
+          }
+          if (patch.col && patch.rawVal !== undefined) {
+            const parsed =
+              patch.rawVal === '' || patch.rawVal === '-' ? 0 : parseFloat(patch.rawVal);
+            const num = Number.isFinite(parsed) ? parsed : 0;
+            return {
+              ...it,
+              values: updateTripletColumn(it.values, patch.col, num),
+            };
+          }
+          return it;
+        }),
       }),
-    }));
+      false,
+      patch.col !== undefined
+    );
   };
 
   const handleRemoveExtraZomatoLine = (
     target: 'extraOtherDeductions' | 'extraAdditions',
     itemId: string
   ) => {
-    updateZomatoBreakup((prevModel) => ({
-      ...prevModel,
-      [target]: (prevModel[target] || []).filter((it) => it.id !== itemId),
-    }));
+    updateZomatoBreakup(
+      (prevModel) => ({
+        ...prevModel,
+        [target]: (prevModel[target] || []).filter((it) => it.id !== itemId),
+      }),
+      false,
+      true
+    );
   };
 
   const handleNumberChange = (
@@ -1410,7 +1446,7 @@ export const PayoutReviewModal: React.FC<PayoutReviewModalProps> = ({
               ======================================================================== */}
           {isZomato && zb ? (
             <div className="space-y-4">
-              {/* Zomato Sheet Banner */}
+              {/* Zomato Unified Canonical Sheet Banner */}
               <div className="bg-gradient-to-r from-rose-50 via-white to-sky-50 rounded-2xl p-3.5 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center font-black text-sm shrink-0">
@@ -1419,14 +1455,20 @@ export const PayoutReviewModal: React.FC<PayoutReviewModalProps> = ({
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-black uppercase tracking-wider text-slate-900">
-                        Zomato &ldquo;Payout Breakup&rdquo; Sheet Model (A → J)
+                        Unified Zomato Canonical Model (A → J · Rows 1–32)
                       </span>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
-                        Tab Evaluated: {zb.sheetNameUsed || 'Payout Breakup'}
+                        Tab: {zb.sheetNameUsed || 'Payout Breakup'}
                       </span>
+                      {zb.detectedSourceTemplate &&
+                        zb.detectedSourceTemplate !== 'classic_breakup_a_j' && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                            {zb.detectedSourceTemplateLabel || 'Auto-Mapped to Canonical A–J'}
+                          </span>
+                        )}
                     </div>
                     <p className="text-[11px] text-slate-600 mt-0.5">
-                      Exact section &amp; line-item structure (`1–32` + `Settlement breakdown`). Edit any Delivered, Cancelled/Rejected, or Total cell to recalculate `A → J` live.
+                      All Zomato payout formats (classic, shifted-row, newer Eternal/Zomato templates, signed summaries &amp; order-level sheets) map into this single consistent `A → J` (`1–32` + `Settlement breakdown`) structure.
                     </p>
                   </div>
                 </div>
@@ -1435,6 +1477,12 @@ export const PayoutReviewModal: React.FC<PayoutReviewModalProps> = ({
                     Net Order Value (A):{' '}
                     <strong className="text-emerald-700">
                       {formatZomatoSheetINR(zb.sectionA_netOrderValue.total)}
+                    </strong>
+                  </div>
+                  <div>
+                    Hyperpure (G):{' '}
+                    <strong className="text-rose-700">
+                      {formatZomatoSheetINR(zb.sectionG_investmentInHyperpure.total)}
                     </strong>
                   </div>
                   <div>
@@ -1658,7 +1706,7 @@ export const PayoutReviewModal: React.FC<PayoutReviewModalProps> = ({
                       />
                       <ZomatoTripletEditRow
                         sNo="13"
-                        label="Long distance enablement fee"
+                        label="Long distance enablement / Fulfilment fee"
                         signHint="+"
                         triplet={zb.row13_longDistanceFee}
                         onChangeCol={(col, v) =>
@@ -1667,7 +1715,7 @@ export const PayoutReviewModal: React.FC<PayoutReviewModalProps> = ({
                       />
                       <ZomatoTripletEditRow
                         sNo="14"
-                        label="Discount on long distance enablement fee"
+                        label="Discount on long distance / fulfilment fee"
                         signHint="-"
                         triplet={zb.row14_longDistanceDiscount}
                         onChangeCol={(col, v) =>

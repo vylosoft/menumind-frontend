@@ -150,6 +150,9 @@ export function mergeWithDefaultMappings(
 }
 
 export function getSavedAggregatorMappings(): AggregatorBrandOutletMapping[] {
+  if (typeof localStorage === 'undefined') {
+    return [...DEFAULT_AGGREGATOR_MAPPINGS];
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY_AGGREGATOR_MAPPINGS);
     if (raw) {
@@ -165,6 +168,7 @@ export function getSavedAggregatorMappings(): AggregatorBrandOutletMapping[] {
 }
 
 export function saveAggregatorMappings(mappings: AggregatorBrandOutletMapping[]): void {
+  if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEY_AGGREGATOR_MAPPINGS, JSON.stringify(mappings));
   } catch (err) {

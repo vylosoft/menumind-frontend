@@ -70,13 +70,29 @@ export interface ZomatoBreakupRowItem {
   mappedField: string;
 }
 
+export interface ZomatoNormalizedMappingTrace {
+  sourceSNo?: string;
+  sourceLabel: string;
+  canonicalTarget: string;
+  totalAmount: number;
+}
+
 /**
- * Exact Zomato "Payout Breakup" Sheet Model (Sections A through J, Rows 1 through 32 + Settlement breakdown).
- * Evaluated strictly from the "Payout Breakup" sheet and used for ALL Zomato payouts (weekly & monthly).
+ * Exact Canonical Zomato "Payout Breakup" Sheet Model (Sections A through J, Rows 1 through 32 + Settlement breakdown).
+ * Universal target model: ALL Zomato payout templates (classic, shifted-row, newer Eternal/Zomato formats,
+ * signed summary ledgers, and order-level exports) normalize into this single consistent schema.
  */
 export interface ZomatoPayoutBreakupModel {
   templateVersion: 'zomato_payout_breakup_v2';
   sheetNameUsed: string;
+  detectedSourceTemplate?:
+    | 'classic_breakup_a_j'
+    | 'shifted_or_extended_breakup'
+    | 'signed_summary_ledger'
+    | 'order_level_tabular'
+    | 'legacy_hydrated';
+  detectedSourceTemplateLabel?: string;
+  normalizedMappingsApplied?: ZomatoNormalizedMappingTrace[];
   resId?: string;
   brandName?: string;
   outletLocation?: 'banaswadi' | 'whitefield';

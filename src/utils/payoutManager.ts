@@ -25,6 +25,7 @@ import {
 } from './aggregatorMappingManager';
 import {
   applyZomatoBreakupToPayoutRecord,
+  ensureZomatoBreakupModelOnRecord,
   isZomatoWorkbook,
   parseZomatoPayoutBreakupWorkbook,
 } from './zomatoPayoutModel';
@@ -44,7 +45,7 @@ import {
 const STORAGE_KEY_PAYOUTS = 'menumind_platform_payouts_v2';
 
 /**
- * Load platform payouts from localStorage.
+ * Load platform payouts from localStorage (ensuring all Zomato payouts use the single canonical A-J model).
  */
 export function getSavedPayouts(): PlatformPayoutRecord[] {
   try {
@@ -52,7 +53,13 @@ export function getSavedPayouts(): PlatformPayoutRecord[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed;
+        return parsed.map((rec: PlatformPayoutRecord) => {
+          if (rec && rec.platform === 'zomato') {
+            const zb = ensureZomatoBreakupModelOnRecord(rec);
+            return applyZomatoBreakupToPayoutRecord(rec, zb);
+          }
+          return rec;
+        });
       }
     }
   } catch (e) {
@@ -113,7 +120,9 @@ export function computePayoutDataFingerprint(p: Partial<PlatformPayoutRecord>): 
   const orders = Math.round(Number(p.orderCount) || 0);
   const gross = Math.round(Number(p.grossSales) || 0);
   const net = Math.round(Number(p.actualBankSettlement ?? p.calculatedNetPayout) || 0);
-  return `${plat}|${resId}|${outlet}|${month}|${pType}|${week}|${orders}|${gross}|${net}`;
+  const hp = Math.round(Number(p.hyperpureRecovery) || 0);
+  const ads = Math.round(Number(p.advertisingSpend) || 0);
+  return `${plat}|${resId}|${outlet}|${month}|${pType}|${week}|${orders}|${gross}|${net}|${hp}|${ads}`;
 }
 
 /**
@@ -518,7 +527,7 @@ export async function parseAggregatorPayoutSpreadsheet(
 
   // Sample top metadata rows from lightweight sheets first so Zomato workbooks are routed
   // strictly to "Payout Breakup" without scanning Order-Level or Addition/Deduction sheets.
-  const quickMetaSample = workbook.SheetNames.slice(0, 5)
+  const quickMetaSample = workbook.SheetNames.slice(0, 12)
     .filter((n) => !/order[\s_-]*level|transactions?/i.test(n))
     .map((name) => {
       const topRows: any[][] = XLSX.utils.sheet_to_json(workbook.Sheets[name], {
