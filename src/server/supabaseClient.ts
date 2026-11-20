@@ -611,6 +611,17 @@ function mapDbRowToPlatformPayout(r: any) {
 }
 
 
+
+// Postgres DATE columns arrive as local-midnight Date objects; format with LOCAL parts so the
+// calendar day never shifts (toISOString() would move it back a day on UTC+ machines).
+function dbDateToYmd(d: any): string {
+  if (!d) return '';
+  if (typeof d === 'string') return d.slice(0, 10);
+  const dt = d as Date;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+}
+
 // ---- Catering: keep the COMPLETE order (all editable fields) alongside the DB columns ----
 // The catering_orders table only has a limited set of columns, so the full order object is stored
 // (base64 JSON) at the end of the existing `notes` column and restored on pull. No schema change needed.
@@ -1756,8 +1767,8 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
         customerEmail: r.customer_email || '',
         deliveryAddress: r.delivery_address || '',
         deliveryLocation: r.delivery_address || '',
-        eventDate: r.event_date ? r.event_date.toISOString().slice(0, 10) : '',
-        orderConfirmationDate: r.order_confirmation_date ? r.order_confirmation_date.toISOString().slice(0, 10) : '',
+        eventDate: dbDateToYmd(r.event_date),
+        orderConfirmationDate: dbDateToYmd(r.order_confirmation_date),
         guestCount: Number(r.guest_count) || 50,
         foodPackageType: r.food_package_type || '',
         pricingType: r.pricing_type || 'PER_PLATE',
@@ -1807,13 +1818,13 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
         cateringContribution: isCompleted ? Math.round(netVal * 0.5) : 0,
         cateringContributionPct: 50,
         isRevenueRecognized: isCompleted,
-        revenueRecognitionMonth: r.event_date ? r.event_date.toISOString().slice(0, 7) : '2026-10',
+        revenueRecognitionMonth: r.event_date ? dbDateToYmd(r.event_date).slice(0, 7) : '2026-10',
         isPotentialDuplicate: false,
         duplicateConfirmed: false,
         payments: [
           {
             id: `PAY-${r.id}`,
-            date: r.order_confirmation_date ? r.order_confirmation_date.toISOString().slice(0, 10) : '',
+            date: dbDateToYmd(r.order_confirmation_date),
             amount: advAmt,
             method: 'Bank Transfer',
             type: advAmt >= netVal ? 'final' : 'advance',

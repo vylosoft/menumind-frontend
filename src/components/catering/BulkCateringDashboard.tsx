@@ -125,12 +125,23 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
   const categoryBreakdown = useMemo(() => {
     const map: Record<string, number> = {};
     orders
-      .filter((o) => (o.status === 'completed' || o.status === 'fully_paid') && !o.duplicateConfirmed)
+      .filter((o) => {
+        if (outletFilter !== 'all' && o.outletId !== outletFilter) return false;
+        if (!((o.status === 'completed' || o.status === 'fully_paid') && !o.duplicateConfirmed)) return false;
+        // Same month rule as the summary cards above
+        return o.revenueRecognitionMonth === selectedMonth || String(o.eventDate || '').startsWith(selectedMonth);
+      })
       .forEach((o) => {
-        map[o.eventCategory] = (map[o.eventCategory] || 0) + o.netRecognizedValue;
+        const totalDue =
+          (o.agreedOrderValue || 0) -
+          (o.customerDiscount || 0) +
+          (o.additionalDeliveryCharges || 0) +
+          (o.otherAgreedCharges || 0);
+        const rev = o.netRecognizedValue > 0 ? o.netRecognizedValue : totalDue;
+        map[o.eventCategory] = (map[o.eventCategory] || 0) + rev;
       });
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [orders]);
+  }, [orders, selectedMonth, outletFilter]);
 
   const handleSaveOrder = (newOrUpdatedOrder: CateringOrder) => {
     const exists = orders.some((o) => o.id === newOrUpdatedOrder.id);

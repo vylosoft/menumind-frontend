@@ -134,10 +134,18 @@ export function computeCateringSummary(
       (o.additionalDeliveryCharges || 0) +
       (o.otherAgreedCharges || 0);
     const balance = Math.max(0, totalDue - (o.totalAmountCollected || 0));
-    totalOutstandingReceivables += balance;
+    // Cancelled orders and confirmed duplicates are not receivables
+    if (o.status !== 'cancelled' && !o.duplicateConfirmed) {
+      totalOutstandingReceivables += balance;
+    }
 
-    // Advances for unfulfilled/future events are liabilities
-    if (o.status !== 'completed' && o.status !== 'cancelled' && o.advanceAmountCollected > 0) {
+    // Advances for unfulfilled/future events are liabilities (fully paid / completed orders are not)
+    if (
+      o.status !== 'completed' &&
+      o.status !== 'fully_paid' &&
+      o.status !== 'cancelled' &&
+      o.advanceAmountCollected > 0
+    ) {
       totalAdvanceLiabilities += o.advanceAmountCollected;
     }
 
