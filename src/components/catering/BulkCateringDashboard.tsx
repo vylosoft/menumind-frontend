@@ -1,16 +1,16 @@
-import { appUrl } from "../../lib/appUrl";
+import { appUrl } from '../../lib/appUrl';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from "react";
-import { CateringOrder } from "../../types/catering";
-import { ParentDish, RawSalesRecord } from "../../types/restaurant";
-import { DishRecipe } from "../../types/recipe";
-import { formatINR, formatPct } from "../../utils/financeCalculations";
-import { computeCateringSummary } from "../../utils/cateringCalculations";
-import { AddEditCateringModal } from "./AddEditCateringModal";
+import React, { useState, useMemo } from 'react';
+import { CateringOrder } from '../../types/catering';
+import { ParentDish, RawSalesRecord } from '../../types/restaurant';
+import { DishRecipe } from '../../types/recipe';
+import { formatINR, formatPct } from '../../utils/financeCalculations';
+import { computeCateringSummary, orderOutstanding } from '../../utils/cateringCalculations';
+import { AddEditCateringModal } from './AddEditCateringModal';
 import {
   Plus,
   Calendar,
@@ -31,14 +31,11 @@ import {
   Sparkles,
   Cloud,
   RefreshCw,
-} from "lucide-react";
+} from 'lucide-react';
 
 interface BulkCateringDashboardProps {
   orders: CateringOrder[];
-  onUpdateOrders: (
-    updated: CateringOrder[],
-    opts?: { fromCloud?: boolean },
-  ) => void;
+  onUpdateOrders: (updated: CateringOrder[], opts?: { fromCloud?: boolean }) => void;
   parentDishes: ParentDish[];
   recipes: DishRecipe[];
   petpoojaSales?: RawSalesRecord[];
@@ -55,49 +52,39 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
   onNavigateToPnL,
   onOpenSupabaseModal,
 }) => {
-  const [selectedMonth, setSelectedMonth] = useState<string>("2026-10");
-  const [outletFilter, setOutletFilter] = useState<
-    "all" | "banaswadi" | "whitefield"
-  >("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [searchTerm, setSearchTerm] = useState<string>("");
+  const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
+  const [outletFilter, setOutletFilter] = useState<'all' | 'banaswadi' | 'whitefield'>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState<string>('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [orderToEdit, setOrderToEdit] = useState<CateringOrder | null>(null);
   const [isPullingCloud, setIsPullingCloud] = useState(false);
-  const [cloudNotification, setCloudNotification] = useState<string | null>(
-    null,
-  );
+  const [cloudNotification, setCloudNotification] = useState<string | null>(null);
 
   const handlePullFromCloud = async () => {
     setIsPullingCloud(true);
     setCloudNotification(null);
     try {
-      const res = await fetch(appUrl("/api/supabase/pull"));
+      const res = await fetch(appUrl('/api/supabase/pull'));
       if (res.ok) {
         const json = await res.json();
-        if (
-          json.success &&
-          Array.isArray(json.data?.cateringOrders) &&
-          json.data.cateringOrders.length > 0
-        ) {
+        if (json.success && Array.isArray(json.data?.cateringOrders) && json.data.cateringOrders.length > 0) {
           onUpdateOrders(json.data.cateringOrders, { fromCloud: true });
-          setCloudNotification(
-            `Loaded ${json.data.cateringOrders.length} catering order(s) from Supabase!`,
-          );
+          setCloudNotification(`Loaded ${json.data.cateringOrders.length} catering order(s) from Supabase!`);
           setTimeout(() => setCloudNotification(null), 4000);
         } else {
-          setCloudNotification("No catering orders found in Supabase.");
+          setCloudNotification('No catering orders found in Supabase.');
           setTimeout(() => setCloudNotification(null), 4000);
         }
       } else {
-        setCloudNotification("Failed to pull orders from Supabase.");
+        setCloudNotification('Failed to pull orders from Supabase.');
         setTimeout(() => setCloudNotification(null), 4000);
       }
     } catch (e: any) {
-      console.error("Error pulling catering from Supabase:", e);
-      setCloudNotification("Error connecting to Supabase.");
+      console.error('Error pulling catering from Supabase:', e);
+      setCloudNotification('Error connecting to Supabase.');
       setTimeout(() => setCloudNotification(null), 4000);
     } finally {
       setIsPullingCloud(false);
@@ -106,28 +93,22 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
 
   // Compute summary metrics
   const summary = useMemo(() => {
-    return computeCateringSummary(
-      orders,
-      selectedMonth,
-      outletFilter === "all" ? "consolidated" : outletFilter,
-    );
+    return computeCateringSummary(orders, selectedMonth, outletFilter === 'all' ? 'consolidated' : outletFilter);
   }, [orders, selectedMonth, outletFilter]);
 
   // Filtered orders list
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (outletFilter !== "all" && o.outletId !== outletFilter) return false;
-      if (statusFilter !== "all" && o.status !== statusFilter) return false;
-      if (categoryFilter !== "all" && o.eventCategory !== categoryFilter)
-        return false;
+      if (outletFilter !== 'all' && o.outletId !== outletFilter) return false;
+      if (statusFilter !== 'all' && o.status !== statusFilter) return false;
+      if (categoryFilter !== 'all' && o.eventCategory !== categoryFilter) return false;
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         const matchesName = o.eventName.toLowerCase().includes(term);
         const matchesCust = o.customerName?.toLowerCase().includes(term);
         const matchesCat = o.eventCategory.toLowerCase().includes(term);
         const matchesId = o.id.toLowerCase().includes(term);
-        if (!matchesName && !matchesCust && !matchesCat && !matchesId)
-          return false;
+        if (!matchesName && !matchesCust && !matchesCat && !matchesId) return false;
       }
       return true;
     });
@@ -136,51 +117,36 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
   // Upcoming confirmed events (unfulfilled future orders)
   const upcomingEvents = useMemo(() => {
     return orders.filter(
-      (o) =>
-        o.status === "confirmed" ||
-        o.status === "advance_received" ||
-        o.status === "preparing",
+      (o) => (o.status === 'confirmed' || o.status === 'advance_received' || o.status === 'preparing')
     );
   }, [orders]);
 
   // Months available in the data (always includes the default month)
   const monthOptions = useMemo(() => {
-    const set = new Set<string>(["2026-10"]);
+    const set = new Set<string>(['2026-10']);
     orders.forEach((o) => {
-      const m = String(o.revenueRecognitionMonth || o.eventDate || "").slice(
-        0,
-        7,
-      );
+      const m = String(o.revenueRecognitionMonth || o.eventDate || '').slice(0, 7);
       if (/^\d{4}-\d{2}$/.test(m)) set.add(m);
     });
     return Array.from(set).sort();
   }, [orders]);
   const monthLabel = (m: string) =>
-    m === "all"
-      ? "All months"
-      : new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", {
-          month: "long",
-          year: "numeric",
-        });
+    m === 'all'
+      ? 'All months'
+      : new Date(`${m}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
   // Event category revenue breakdown
   const categoryBreakdown = useMemo(() => {
     const map: Record<string, number> = {};
     orders
       .filter((o) => {
-        if (outletFilter !== "all" && o.outletId !== outletFilter) return false;
-        if (
-          !(
-            (o.status === "completed" || o.status === "fully_paid") &&
-            !o.duplicateConfirmed
-          )
-        )
-          return false;
+        if (outletFilter !== 'all' && o.outletId !== outletFilter) return false;
+        if (!((o.status === 'completed' || o.status === 'fully_paid') && !o.duplicateConfirmed)) return false;
         // Same month rule as the summary cards above
         return (
-          selectedMonth === "all" ||
+          selectedMonth === 'all' ||
           o.revenueRecognitionMonth === selectedMonth ||
-          String(o.eventDate || "").startsWith(selectedMonth)
+          String(o.eventDate || '').startsWith(selectedMonth)
         );
       })
       .forEach((o) => {
@@ -199,9 +165,7 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
     const exists = orders.some((o) => o.id === newOrUpdatedOrder.id);
     let updated: CateringOrder[];
     if (exists) {
-      updated = orders.map((o) =>
-        o.id === newOrUpdatedOrder.id ? newOrUpdatedOrder : o,
-      );
+      updated = orders.map((o) => (o.id === newOrUpdatedOrder.id ? newOrUpdatedOrder : o));
     } else {
       updated = [newOrUpdatedOrder, ...orders];
     }
@@ -209,22 +173,13 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
   };
 
   const handleDeleteOrder = (orderId: string) => {
-    if (
-      confirm("Are you sure you want to remove this catering order record?")
-    ) {
+    if (confirm('Are you sure you want to remove this catering order record?')) {
       onUpdateOrders(orders.filter((o) => o.id !== orderId));
     }
   };
 
-  // Balance still to be collected on an order
-  const orderBalance = (o: CateringOrder) => {
-    const totalDue =
-      (o.agreedOrderValue || 0) -
-      (o.customerDiscount || 0) +
-      (o.additionalDeliveryCharges || 0) +
-      (o.otherAgreedCharges || 0);
-    return Math.max(0, totalDue - (o.totalAmountCollected || 0));
-  };
+  // Balance still to be collected (0 once the order is Reviewed & Confirmed)
+  const orderBalance = (o: CateringOrder) => orderOutstanding(o);
 
   // Customer paid the remaining balance: record it, which reduces Outstanding Receivables
   const handleMarkPaymentReceived = (orderId: string) => {
@@ -232,11 +187,7 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
     if (!target) return;
     const balance = orderBalance(target);
     if (balance <= 0) return;
-    if (
-      !confirm(
-        `Confirm that the remaining \u20B9${balance.toLocaleString("en-IN")} for "${target.eventName}" has been received?`,
-      )
-    ) {
+    if (!confirm(`Confirm that the remaining \u20B9${balance.toLocaleString('en-IN')} for "${target.eventName}" has been received?`)) {
       return;
     }
     const today = new Date().toISOString().slice(0, 10);
@@ -248,21 +199,21 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
             totalAmountCollected: collected,
             advanceAmountCollected: collected,
             remainingAmountDue: 0,
-            paymentStatus: "fully_paid" as const,
+            paymentStatus: 'fully_paid' as const,
             payments: [
               ...(o.payments || []),
               {
                 id: `PAY-${orderId}-${Date.now()}`,
                 date: today,
                 amount: balance,
-                method: "Bank Transfer" as const,
-                type: "final" as const,
-                notes: "Remaining balance received and confirmed",
+                method: 'Bank Transfer' as const,
+                type: 'final' as const,
+                notes: 'Remaining balance received and confirmed',
               },
             ],
             updatedAt: new Date().toISOString(),
           }
-        : o,
+        : o
     );
     onUpdateOrders(updated);
   };
@@ -274,9 +225,7 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
         return {
           ...o,
           duplicateConfirmed: nextDuplicate,
-          isRevenueRecognized:
-            !nextDuplicate &&
-            (o.status === "completed" || o.status === "fully_paid"),
+          isRevenueRecognized: !nextDuplicate && (o.status === 'completed' || o.status === 'fully_paid'),
         };
       }
       return o;
@@ -291,22 +240,18 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
         <div>
           <div className="flex items-center gap-2 mb-1.5">
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wider uppercase bg-teal-500/20 text-teal-300 border border-teal-500/30 flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5" /> Module A &bull; Bulk Catering
-              Intelligence
+              <Sparkles className="w-3.5 h-3.5" /> Module A &bull; Bulk Catering Intelligence
             </span>
             <span className="text-xs text-slate-300 flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-slate-400" /> Direct Sales
-              Subchannel
+              <Calendar className="w-3.5 h-3.5 text-slate-400" /> Direct Sales Subchannel
             </span>
           </div>
           <h1 className="text-xl md:text-2xl font-black tracking-tight text-white">
             Bulk Catering &amp; Event Order Management
           </h1>
           <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
-            Record, price, and track direct bulk orders (Durga Puja, Kali Puja,
-            Griha Pravesh, Corporate Galas). Accurately separates customer
-            advance liabilities from recognized event revenue and feeds the
-            outlet P&amp;L without modifying Petpooja POS files.
+            Record, price, and track direct bulk orders (Durga Puja, Kali Puja, Griha Pravesh, Corporate Galas).
+            Accurately separates customer advance liabilities from recognized event revenue and feeds the outlet P&amp;L without modifying Petpooja POS files.
           </p>
         </div>
 
@@ -318,9 +263,7 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
             title="Month shown in the catering totals"
           >
             {monthOptions.map((m) => (
-              <option key={m} value={m}>
-                {monthLabel(m)}
-              </option>
+              <option key={m} value={m}>{monthLabel(m)}</option>
             ))}
             <option value="all">All months</option>
           </select>
@@ -330,10 +273,8 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
             className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-teal-300 border border-slate-700 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
             title="Fetch latest catering orders directly from Supabase database"
           >
-            <RefreshCw
-              className={`w-3.5 h-3.5 ${isPullingCloud ? "animate-spin" : ""}`}
-            />
-            <span>{isPullingCloud ? "Pulling..." : "Pull Supabase"}</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${isPullingCloud ? 'animate-spin' : ''}`} />
+            <span>{isPullingCloud ? 'Pulling...' : 'Pull Supabase'}</span>
           </button>
 
           {onOpenSupabaseModal && (
@@ -382,9 +323,7 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
           </div>
           <div className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
             <span>Completed: {summary.completedOrders} events</span>
-            <span className="font-semibold text-emerald-600">
-              {outletFilter.toUpperCase()}
-            </span>
+            <span className="font-semibold text-emerald-600">{outletFilter.toUpperCase()}</span>
           </div>
         </div>
 
@@ -402,8 +341,7 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
             </span>
           </div>
           <div className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-100">
-            Direct Costs: {formatINR(summary.totalDirectExpenses)} (BOM +
-            Delivery)
+            Direct Costs: {formatINR(summary.totalDirectExpenses)} (BOM + Delivery)
           </div>
         </div>
 
@@ -444,20 +382,14 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
         <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
           <h3 className="text-base font-bold text-slate-900 flex items-center justify-between">
             <span>Catering by Kitchen Outlet</span>
-            <span className="text-xs font-normal text-slate-500">
-              {monthLabel(selectedMonth)}
-            </span>
+            <span className="text-xs font-normal text-slate-500">{monthLabel(selectedMonth)}</span>
           </h3>
 
           <div className="space-y-3">
             <div className="p-3.5 bg-teal-50/60 border border-teal-200 rounded-xl flex items-center justify-between">
               <div>
-                <span className="text-xs font-bold text-teal-950 block">
-                  Banaswadi Kitchen
-                </span>
-                <span className="text-[11px] text-teal-700">
-                  Durga Puja &amp; Griha Pravesh
-                </span>
+                <span className="text-xs font-bold text-teal-950 block">Banaswadi Kitchen</span>
+                <span className="text-[11px] text-teal-700">Durga Puja &amp; Griha Pravesh</span>
               </div>
               <div className="text-right">
                 <span className="text-base font-black text-teal-900">
@@ -465,24 +397,16 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
                 </span>
                 <span className="text-[10px] text-teal-700 block">
                   {summary.totalRecognizedRevenue > 0
-                    ? formatPct(
-                        (summary.banaswadiRevenue /
-                          summary.totalRecognizedRevenue) *
-                          100,
-                      )
-                    : "0%"}
+                    ? formatPct((summary.banaswadiRevenue / summary.totalRecognizedRevenue) * 100)
+                    : '0%'}
                 </span>
               </div>
             </div>
 
             <div className="p-3.5 bg-purple-50/60 border border-purple-200 rounded-xl flex items-center justify-between">
               <div>
-                <span className="text-xs font-bold text-purple-950 block">
-                  Whitefield Kitchen (-w)
-                </span>
-                <span className="text-[11px] text-purple-700">
-                  Tech Park Galas &amp; Weddings
-                </span>
+                <span className="text-xs font-bold text-purple-950 block">Whitefield Kitchen (-w)</span>
+                <span className="text-[11px] text-purple-700">Tech Park Galas &amp; Weddings</span>
               </div>
               <div className="text-right">
                 <span className="text-base font-black text-purple-900">
@@ -490,12 +414,8 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
                 </span>
                 <span className="text-[10px] text-purple-700 block">
                   {summary.totalRecognizedRevenue > 0
-                    ? formatPct(
-                        (summary.whitefieldRevenue /
-                          summary.totalRecognizedRevenue) *
-                          100,
-                      )
-                    : "0%"}
+                    ? formatPct((summary.whitefieldRevenue / summary.totalRecognizedRevenue) * 100)
+                    : '0%'}
                 </span>
               </div>
             </div>
@@ -503,30 +423,21 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
 
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-600">
             <span>Direct Revenue Channel:</span>
-            <span className="font-bold text-slate-900">
-              Direct Sales &rarr; Bulk Catering
-            </span>
+            <span className="font-bold text-slate-900">Direct Sales &rarr; Bulk Catering</span>
           </div>
         </div>
 
         {/* Event Occasions Breakdown */}
         <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
-          <h3 className="text-base font-bold text-slate-900">
-            Revenue by Event Occasion
-          </h3>
+          <h3 className="text-base font-bold text-slate-900">Revenue by Event Occasion</h3>
           <div className="space-y-2.5">
             {categoryBreakdown.map(([cat, rev]) => {
-              const pct =
-                summary.totalRecognizedRevenue > 0
-                  ? (rev / summary.totalRecognizedRevenue) * 100
-                  : 0;
+              const pct = summary.totalRecognizedRevenue > 0 ? (rev / summary.totalRecognizedRevenue) * 100 : 0;
               return (
                 <div key={cat} className="space-y-1">
                   <div className="flex items-center justify-between text-xs font-semibold">
                     <span className="text-slate-800">{cat}</span>
-                    <span className="text-slate-900">
-                      {formatINR(rev)} ({pct.toFixed(0)}%)
-                    </span>
+                    <span className="text-slate-900">{formatINR(rev)} ({pct.toFixed(0)}%)</span>
                   </div>
                   <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                     <div
@@ -544,30 +455,20 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
         <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4 flex flex-col justify-between">
           <div>
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-1.5 mb-2">
-              <Calendar className="w-4 h-4 text-amber-500" /> Upcoming Confirmed
-              Bookings
+              <Calendar className="w-4 h-4 text-amber-500" /> Upcoming Confirmed Bookings
             </h3>
             <div className="space-y-2 text-xs">
               {upcomingEvents.length === 0 ? (
-                <div className="text-slate-400 italic py-4 text-center">
-                  No upcoming events queued.
-                </div>
+                <div className="text-slate-400 italic py-4 text-center">No upcoming events queued.</div>
               ) : (
                 upcomingEvents.map((evt) => (
-                  <div
-                    key={evt.id}
-                    className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1"
-                  >
+                  <div key={evt.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
                     <div className="flex items-center justify-between font-bold text-slate-900">
                       <span>{evt.eventName}</span>
-                      <span className="text-amber-700">
-                        {formatINR(evt.agreedOrderValue)}
-                      </span>
+                      <span className="text-amber-700">{formatINR(evt.agreedOrderValue)}</span>
                     </div>
                     <div className="flex items-center justify-between text-[11px] text-slate-500">
-                      <span>
-                        Date: {evt.eventDate} ({evt.guestCount} guests)
-                      </span>
+                      <span>Date: {evt.eventDate} ({evt.guestCount} guests)</span>
                       <span className="capitalize px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold text-[10px]">
                         Advance: {formatINR(evt.advanceAmountCollected)}
                       </span>
@@ -579,9 +480,8 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
           </div>
 
           <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-500">
-            <strong>Accounting Rule:</strong> Future confirmed bookings do not
-            increase current month revenue. Advances are kept in liabilities
-            until food service is completed.
+            <strong>Accounting Rule:</strong> Future confirmed bookings do not increase current month revenue.
+            Advances are kept in liabilities until food service is completed.
           </div>
         </div>
       </div>
@@ -590,12 +490,9 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
       <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
-            <h3 className="text-base font-bold text-slate-900">
-              Catering Order Registry &amp; Ledger
-            </h3>
+            <h3 className="text-base font-bold text-slate-900">Catering Order Registry &amp; Ledger</h3>
             <p className="text-xs text-slate-500">
-              Complete log of corporate, community and festival orders with
-              invoice and tax review flags
+              Complete log of corporate, community and festival orders with invoice and tax review flags
             </p>
           </div>
 
@@ -650,13 +547,9 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
                 <th className="py-3 px-3 text-right">Guests</th>
                 <th className="py-3 px-3 text-right">Agreed Value</th>
                 <th className="py-3 px-3 text-right">Advance Held</th>
-                <th className="py-3 px-3 text-right font-black text-slate-900">
-                  Recognized Rev
-                </th>
+                <th className="py-3 px-3 text-right font-black text-slate-900">Recognized Rev</th>
                 <th className="py-3 px-3 text-right">Direct Costs</th>
-                <th className="py-3 px-3 text-right font-bold text-emerald-700">
-                  Contribution
-                </th>
+                <th className="py-3 px-3 text-right font-bold text-emerald-700">Contribution</th>
                 <th className="py-3 px-3 text-center">POS Status</th>
                 <th className="py-3 px-3 text-center">Tax Review</th>
                 <th className="py-3 px-3 text-right">Actions</th>
@@ -667,205 +560,175 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
                 <tr>
                   <td colSpan={12} className="py-8 text-center text-slate-400">
                     <Calendar className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                    <p className="font-semibold text-slate-600">
-                      No catering or event orders logged yet.
-                    </p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Click &ldquo;+ Add Catering Order&rdquo; to record your
-                      first corporate or festival booking.
-                    </p>
+                    <p className="font-semibold text-slate-600">No catering or event orders logged yet.</p>
+                    <p className="text-xs text-slate-400 mt-1">Click &ldquo;+ Add Catering Order&rdquo; to record your first corporate or festival booking.</p>
                   </td>
                 </tr>
               ) : (
                 filteredOrders.map((o) => (
-                  <tr
-                    key={o.id}
-                    className="hover:bg-slate-50/60 transition-colors"
-                  >
-                    <td className="py-3 px-3">
-                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                        <span>{o.eventName}</span>
-                        {o.duplicateConfirmed && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-bold uppercase">
-                            POS Duplicate
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-mono">
-                        {o.id} &bull; {o.eventCategory}
-                      </div>
-                      {o.customerName && (
-                        <div className="text-[10px] text-slate-400 italic">
-                          {o.customerName}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3 px-3 capitalize">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          o.outletId === "whitefield"
-                            ? "bg-purple-100 text-purple-800"
-                            : "bg-teal-100 text-teal-800"
-                        }`}
-                      >
-                        {o.outletId}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 font-medium text-slate-800">
-                      {o.eventDate}
-                    </td>
-                    <td className="py-3 px-3 text-right">{o.guestCount} pax</td>
-                    <td className="py-3 px-3 text-right font-semibold text-slate-800">
-                      {formatINR(o.agreedOrderValue)}
-                    </td>
-                    <td className="py-3 px-3 text-right text-amber-700 font-medium">
-                      {formatINR(o.advanceAmountCollected)}
-                    </td>
-                    <td className="py-3 px-3 text-right font-black text-slate-950">
-                      {o.isRevenueRecognized ? (
-                        formatINR(o.netRecognizedValue)
-                      ) : (
-                        <span className="text-slate-400 font-normal italic">
-                          Deferred / Not Recog
+                  <tr key={o.id} className="hover:bg-slate-50/60 transition-colors">
+                  <td className="py-3 px-3">
+                    <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                      <span>{o.eventName}</span>
+                      {o.duplicateConfirmed && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-bold uppercase">
+                          POS Duplicate
                         </span>
                       )}
-                    </td>
-                    <td className="py-3 px-3 text-right text-slate-600">
-                      {formatINR(o.expenses?.totalDirectVariableCost || 0)}
-                    </td>
-                    <td className="py-3 px-3 text-right font-bold text-emerald-700">
-                      {o.isRevenueRecognized ? (
-                        formatINR(o.cateringContribution)
-                      ) : (
-                        <span className="text-slate-400 font-normal">—</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-mono">
+                      {o.id} &bull; {o.eventCategory}
+                    </div>
+                    {o.customerName && (
+                      <div className="text-[10px] text-slate-400 italic">{o.customerName}</div>
+                    )}
+                  </td>
+                  <td className="py-3 px-3 capitalize">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        o.outletId === 'whitefield'
+                          ? 'bg-purple-100 text-purple-800'
+                          : 'bg-teal-100 text-teal-800'
+                      }`}
+                    >
+                      {o.outletId}
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 font-medium text-slate-800">{o.eventDate}</td>
+                  <td className="py-3 px-3 text-right">{o.guestCount} pax</td>
+                  <td className="py-3 px-3 text-right font-semibold text-slate-800">
+                    {formatINR(o.agreedOrderValue)}
+                  </td>
+                  <td className="py-3 px-3 text-right text-amber-700 font-medium">
+                    {formatINR(o.advanceAmountCollected)}
+                  </td>
+                  <td className="py-3 px-3 text-right font-black text-slate-950">
+                    {o.isRevenueRecognized ? (
+                      formatINR(o.netRecognizedValue)
+                    ) : (
+                      <span className="text-slate-400 font-normal italic">Deferred / Not Recog</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-3 text-right text-slate-600">
+                    {formatINR(o.expenses?.totalDirectVariableCost || 0)}
+                  </td>
+                  <td className="py-3 px-3 text-right font-bold text-emerald-700">
+                    {o.isRevenueRecognized ? (
+                      formatINR(o.cateringContribution)
+                    ) : (
+                      <span className="text-slate-400 font-normal">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        o.posInvoiceStatus === 'generated_in_petpooja'
+                          ? 'bg-amber-100 text-amber-800'
+                          : o.posInvoiceStatus === 'external_invoice_issued'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {o.posInvoiceStatus === 'generated_in_petpooja'
+                        ? 'In Petpooja'
+                        : o.posInvoiceStatus === 'external_invoice_issued'
+                        ? 'GST Invoiced'
+                        : 'Manual Direct'}
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        o.taxReviewStatus === 'Reviewed & Confirmed'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {o.taxReviewStatus}
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => {
+                          setOrderToEdit(o);
+                          setIsModalOpen(true);
+                        }}
+                        className="p-1 rounded text-slate-400 hover:text-slate-800"
+                        title="Edit order details"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      {orderBalance(o) > 0 && (
+                        <button
+                          onClick={() => handleMarkPaymentReceived(o.id)}
+                          className="p-1 rounded text-slate-400 hover:text-emerald-600"
+                          title={`Mark remaining \u20B9${orderBalance(o).toLocaleString('en-IN')} as received`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </button>
                       )}
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          o.posInvoiceStatus === "generated_in_petpooja"
-                            ? "bg-amber-100 text-amber-800"
-                            : o.posInvoiceStatus === "external_invoice_issued"
-                              ? "bg-blue-100 text-blue-800"
-                              : "bg-slate-100 text-slate-700"
+                      <button
+                        onClick={() => handleToggleDuplicate(o.id)}
+                        className={`p-1 rounded ${
+                          o.duplicateConfirmed
+                            ? 'text-amber-600 hover:text-amber-800'
+                            : 'text-slate-400 hover:text-amber-600'
                         }`}
+                        title={
+                          o.duplicateConfirmed
+                            ? 'Marked as Duplicate (Excluded from Revenue)'
+                            : 'Toggle Duplicate status'
+                        }
                       >
-                        {o.posInvoiceStatus === "generated_in_petpooja"
-                          ? "In Petpooja"
-                          : o.posInvoiceStatus === "external_invoice_issued"
-                            ? "GST Invoiced"
-                            : "Manual Direct"}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          o.taxReviewStatus === "Reviewed & Confirmed"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-amber-100 text-amber-800"
-                        }`}
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteOrder(o.id)}
+                        className="p-1 rounded text-slate-400 hover:text-rose-600"
+                        title="Delete order"
                       >
-                        {o.taxReviewStatus}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => {
-                            setOrderToEdit(o);
-                            setIsModalOpen(true);
-                          }}
-                          className="p-1 rounded text-slate-400 hover:text-slate-800"
-                          title="Edit order details"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        {orderBalance(o) > 0 && (
-                          <button
-                            onClick={() => handleMarkPaymentReceived(o.id)}
-                            className="p-1 rounded text-slate-400 hover:text-emerald-600"
-                            title={`Mark remaining \u20B9${orderBalance(o).toLocaleString("en-IN")} as received`}
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleToggleDuplicate(o.id)}
-                          className={`p-1 rounded ${
-                            o.duplicateConfirmed
-                              ? "text-amber-600 hover:text-amber-800"
-                              : "text-slate-400 hover:text-amber-600"
-                          }`}
-                          title={
-                            o.duplicateConfirmed
-                              ? "Marked as Duplicate (Excluded from Revenue)"
-                              : "Toggle Duplicate status"
-                          }
-                        >
-                          <ShieldAlert className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteOrder(o.id)}
-                          className="p-1 rounded text-slate-400 hover:text-rose-600"
-                          title="Delete order"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-slate-300 bg-slate-100/70 font-bold text-slate-900">
-                <td className="py-3 px-3">
-                  Total Filtered ({filteredOrders.length} Bookings)
-                </td>
+                <td className="py-3 px-3">Total Filtered ({filteredOrders.length} Bookings)</td>
                 <td className="py-3 px-3"></td>
                 <td className="py-3 px-3"></td>
                 <td className="py-3 px-3 text-right">
                   {filteredOrders.reduce((sum, o) => sum + o.guestCount, 0)} pax
                 </td>
                 <td className="py-3 px-3 text-right">
-                  {formatINR(
-                    filteredOrders.reduce(
-                      (sum, o) => sum + o.agreedOrderValue,
-                      0,
-                    ),
-                  )}
+                  {formatINR(filteredOrders.reduce((sum, o) => sum + o.agreedOrderValue, 0))}
                 </td>
                 <td className="py-3 px-3 text-right text-amber-800 font-bold">
-                  {formatINR(
-                    filteredOrders.reduce(
-                      (sum, o) => sum + o.advanceAmountCollected,
-                      0,
-                    ),
-                  )}
+                  {formatINR(filteredOrders.reduce((sum, o) => sum + o.advanceAmountCollected, 0))}
                 </td>
                 <td className="py-3 px-3 text-right font-black text-slate-950">
                   {formatINR(
                     filteredOrders
                       .filter((o) => o.isRevenueRecognized)
-                      .reduce((sum, o) => sum + o.netRecognizedValue, 0),
+                      .reduce((sum, o) => sum + o.netRecognizedValue, 0)
                   )}
                 </td>
                 <td className="py-3 px-3 text-right">
                   {formatINR(
                     filteredOrders
                       .filter((o) => o.isRevenueRecognized)
-                      .reduce(
-                        (sum, o) =>
-                          sum + (o.expenses?.totalDirectVariableCost || 0),
-                        0,
-                      ),
+                      .reduce((sum, o) => sum + (o.expenses?.totalDirectVariableCost || 0), 0)
                   )}
                 </td>
                 <td className="py-3 px-3 text-right text-emerald-800 font-black">
                   {formatINR(
                     filteredOrders
                       .filter((o) => o.isRevenueRecognized)
-                      .reduce((sum, o) => sum + o.cateringContribution, 0),
+                      .reduce((sum, o) => sum + o.cateringContribution, 0)
                   )}
                 </td>
                 <td colSpan={3}></td>

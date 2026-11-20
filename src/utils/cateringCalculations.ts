@@ -103,6 +103,21 @@ export function computeCateringEconomics(order: CateringOrder): {
 /**
  * Calculates summary metrics across catering orders for a given month and outlet filter.
  */
+/**
+ * Amount still outstanding on an order. Per the client's rule, an order whose
+ * tax review status is "Reviewed & Confirmed" is treated as payment received,
+ * so nothing is outstanding on it.
+ */
+export function orderOutstanding(o: CateringOrder): number {
+  if (o.taxReviewStatus === 'Reviewed & Confirmed') return 0;
+  const totalDue =
+    (o.agreedOrderValue || 0) -
+    (o.customerDiscount || 0) +
+    (o.additionalDeliveryCharges || 0) +
+    (o.otherAgreedCharges || 0);
+  return Math.max(0, totalDue - (o.totalAmountCollected || 0));
+}
+
 export function computeCateringSummary(
   orders: CateringOrder[],
   selectedMonth: string = '2026-10',
@@ -135,10 +150,9 @@ export function computeCateringSummary(
       (o.customerDiscount || 0) +
       (o.additionalDeliveryCharges || 0) +
       (o.otherAgreedCharges || 0);
-    const balance = Math.max(0, totalDue - (o.totalAmountCollected || 0));
-    // Cancelled orders and confirmed duplicates are not receivables
+    // Cancelled orders, confirmed duplicates and "Reviewed & Confirmed" (received) orders are not receivables
     if (o.status !== 'cancelled' && !o.duplicateConfirmed) {
-      totalOutstandingReceivables += balance;
+      totalOutstandingReceivables += orderOutstanding(o);
     }
 
     // Advances for unfulfilled/future events are liabilities (fully paid / completed orders are not)
