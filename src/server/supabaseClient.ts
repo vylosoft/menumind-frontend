@@ -610,6 +610,33 @@ function mapDbRowToPlatformPayout(r: any) {
   return baseMapped;
 }
 
+
+// ---- Catering: keep the COMPLETE order (all editable fields) alongside the DB columns ----
+// The catering_orders table only has a limited set of columns, so the full order object is stored
+// (base64 JSON) at the end of the existing `notes` column and restored on pull. No schema change needed.
+const MM_ORDER_MARKER = '[[MM_ORDER_JSON:';
+function packCateringNotes(order: any): string | null {
+  try {
+    const clean = String(order?.notes || '').split(MM_ORDER_MARKER)[0].trimEnd();
+    const b64 = Buffer.from(JSON.stringify(order), 'utf8').toString('base64');
+    return `${clean}\n${MM_ORDER_MARKER}${b64}]]`;
+  } catch {
+    return order?.notes || null;
+  }
+}
+function unpackCateringNotes(raw: any): { notes: string; stored: any | null } {
+  const text = String(raw || '');
+  const idx = text.indexOf(MM_ORDER_MARKER);
+  if (idx < 0) return { notes: text, stored: null };
+  const notes = text.slice(0, idx).trimEnd();
+  const end = text.indexOf(']]', idx);
+  try {
+    const b64 = text.slice(idx + MM_ORDER_MARKER.length, end);
+    return { notes, stored: JSON.parse(Buffer.from(b64, 'base64').toString('utf8')) };
+  } catch {
+    return { notes, stored: null };
+  }
+}
 export async function syncDataToSupabase(payload: SyncPayload): Promise<{
   success: boolean;
   message: string;
@@ -1185,7 +1212,7 @@ export async function syncDataToSupabase(payload: SyncPayload): Promise<{
             balVal,
             normPayment,
             normFulfillment,
-            order.notes || null,
+            packCateringNotes(order),
           ]
         );
         cateringCount++;
@@ -1718,7 +1745,8 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
         : payRaw.includes('fully') ? 'fully_paid'
         : 'partially_paid';
 
-      return {
+      const { notes: cleanNotes, stored } = unpackCateringNotes(r.notes);
+      const base: any = {
         id: r.id,
         outletId: r.outlet_id === 'banaswadi' ? 'banaswadi' : 'whitefield',
         eventName: r.event_name,
@@ -1791,10 +1819,12 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
             type: advAmt >= netVal ? 'final' : 'advance',
           },
         ],
-        notes: r.notes || '',
+        notes: cleanNotes,
         createdAt: r.created_at ? r.created_at.toISOString() : new Date().toISOString(),
         updatedAt: r.updated_at ? r.updated_at.toISOString() : new Date().toISOString(),
       };
+      // Restore every editable field exactly as it was saved
+      return stored ? { ...base, ...stored, id: r.id, notes: cleanNotes } : base;
     });
 
     // 5. Load Purchases
