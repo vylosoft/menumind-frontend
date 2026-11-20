@@ -86,26 +86,30 @@ export const AddEditCateringModal: React.FC<AddEditCateringModalProps> = ({
     orderToEdit?.responsibleBrand || (outletId === 'whitefield' ? 'Banglar Jhale Jhole-w' : 'Banglar Jhale Jhole')
   );
   const [deliveryLocation, setDeliveryLocation] = useState(orderToEdit?.deliveryLocation || '');
-  const [guestCount, setGuestCount] = useState<number>(orderToEdit?.guestCount || 100);
+  const [guestCount, setGuestCount] = useState<number>(orderToEdit?.guestCount ?? 100);
   const [status, setStatus] = useState<CateringOrderStatus>(orderToEdit?.status || 'confirmed');
   const [paymentStatus, setPaymentStatus] = useState<CateringPaymentStatus>(
     orderToEdit?.paymentStatus || 'advance_only'
   );
 
   // Financials
-  const [agreedOrderValue, setAgreedOrderValue] = useState<number>(orderToEdit?.agreedOrderValue || 50000);
-  const [customerDiscount, setCustomerDiscount] = useState<number>(orderToEdit?.customerDiscount || 0);
+  const [agreedOrderValue, setAgreedOrderValue] = useState<number>(orderToEdit?.agreedOrderValue ?? 50000);
+  const [customerDiscount, setCustomerDiscount] = useState<number>(orderToEdit?.customerDiscount ?? 0);
   const [additionalDeliveryCharges, setAdditionalDeliveryCharges] = useState<number>(
-    orderToEdit?.additionalDeliveryCharges || 1500
+    orderToEdit?.additionalDeliveryCharges ?? 1500
   );
-  const [otherAgreedCharges, setOtherAgreedCharges] = useState<number>(orderToEdit?.otherAgreedCharges || 0);
+  const [otherAgreedCharges, setOtherAgreedCharges] = useState<number>(orderToEdit?.otherAgreedCharges ?? 0);
   const [taxInclusive, setTaxInclusive] = useState<boolean>(orderToEdit?.taxInclusive ?? true);
-  const [taxRatePct, setTaxRatePct] = useState<number>(orderToEdit?.taxRatePct || 5);
+  const [taxRatePct, setTaxRatePct] = useState<number>(orderToEdit?.taxRatePct ?? 5);
   const [advanceAmountCollected, setAdvanceAmountCollected] = useState<number>(
-    orderToEdit?.advanceAmountCollected || 20000
+    orderToEdit?.advanceAmountCollected ?? 20000
   );
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Bank Transfer');
-  const [paymentRef, setPaymentRef] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
+    orderToEdit?.payments?.[orderToEdit.payments.length - 1]?.method || 'Bank Transfer'
+  );
+  const [paymentRef, setPaymentRef] = useState<string>(
+    orderToEdit?.payments?.[orderToEdit.payments.length - 1]?.referenceNo || ''
+  );
 
   // Tax & POS Status
   const [posInvoiceStatus, setPosInvoiceStatus] = useState<PosInvoiceStatus>(
@@ -158,22 +162,22 @@ export const AddEditCateringModal: React.FC<AddEditCateringModalProps> = ({
 
   // Direct expenses
   const [ingredientCost, setIngredientCost] = useState<number>(
-    orderToEdit?.expenses?.ingredientCost || 14000
+    orderToEdit?.expenses?.ingredientCost ?? 14000
   );
   const [packagingCost, setPackagingCost] = useState<number>(
-    orderToEdit?.expenses?.packagingCost || 1100
+    orderToEdit?.expenses?.packagingCost ?? 1100
   );
   const [transportationExpense, setTransportationExpense] = useState<number>(
-    orderToEdit?.expenses?.transportationDeliveryExpense || 1200
+    orderToEdit?.expenses?.transportationDeliveryExpense ?? 1200
   );
   const [tempStaffExpense, setTempStaffExpense] = useState<number>(
-    orderToEdit?.expenses?.temporaryStaffExpense || 2000
+    orderToEdit?.expenses?.temporaryStaffExpense ?? 2000
   );
   const [venueEquipmentExpense, setVenueEquipmentExpense] = useState<number>(
-    orderToEdit?.expenses?.venueEquipmentExpense || 1000
+    orderToEdit?.expenses?.venueEquipmentExpense ?? 1000
   );
   const [otherDirectExpenses, setOtherDirectExpenses] = useState<number>(
-    orderToEdit?.expenses?.otherDirectExpenses || 300
+    orderToEdit?.expenses?.otherDirectExpenses ?? 300
   );
 
   const [selectedParentDish, setSelectedParentDish] = useState<string>(
