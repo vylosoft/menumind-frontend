@@ -153,7 +153,7 @@ export default function App() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          return parsed.filter((o: any) => !o.id?.startsWith('CAT-2026-'));
+          return parsed;
         }
       }
     } catch (e) {
@@ -162,11 +162,25 @@ export default function App() {
     return [];
   });
 
-  const handleUpdateCateringOrders = (updated: CateringOrder[]) => {
+  // Saves catering orders in the browser and (unless they were just pulled from the cloud)
+  // writes them straight to Supabase so edits are not lost on refresh / "Pull Supabase".
+  const handleUpdateCateringOrders = (
+    updated: CateringOrder[],
+    opts?: { fromCloud?: boolean }
+  ) => {
     setCateringOrders(updated);
     try {
       localStorage.setItem('menumind_catering_orders_v1', JSON.stringify(updated));
     } catch (e) {}
+    if (opts?.fromCloud || updated.length === 0) return;
+    void fetch(appUrl('/api/supabase/sync'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        restaurantName: 'MenuMind Grand Dining',
+        cateringOrders: updated,
+      }),
+    }).catch((e) => console.error('Catering auto-sync to Supabase failed', e));
   };
 
   // Staff Directory State with LocalStorage Persistence (clean start, excluding demo)
@@ -267,7 +281,7 @@ export default function App() {
 
         // 3. Catering Orders
         if (Array.isArray(cloud.cateringOrders) && cloud.cateringOrders.length > 0) {
-          handleUpdateCateringOrders(cloud.cateringOrders);
+          handleUpdateCateringOrders(cloud.cateringOrders, { fromCloud: true });
         }
 
         // 4. Purchases & Inventory
@@ -401,7 +415,7 @@ export default function App() {
           handleUpdateOperatingExpenses(cloud.operatingExpenses);
         }
         if (Array.isArray(cloud.cateringOrders) && cloud.cateringOrders.length > 0) {
-          handleUpdateCateringOrders(cloud.cateringOrders);
+          handleUpdateCateringOrders(cloud.cateringOrders, { fromCloud: true });
         }
         if (Array.isArray(cloud.purchases) && cloud.purchases.length > 0) {
           handleUpdatePurchases(cloud.purchases);
@@ -952,7 +966,7 @@ export default function App() {
             handleUpdateStaffDirectory(cloudData.staffDirectory);
           }
           if (Array.isArray(cloudData.cateringOrders) && cloudData.cateringOrders.length > 0) {
-            handleUpdateCateringOrders(cloudData.cateringOrders);
+            handleUpdateCateringOrders(cloudData.cateringOrders, { fromCloud: true });
           }
           if (Array.isArray(cloudData.purchases) && cloudData.purchases.length > 0) {
             handleUpdatePurchases(cloudData.purchases);

@@ -35,7 +35,7 @@ import {
 
 interface BulkCateringDashboardProps {
   orders: CateringOrder[];
-  onUpdateOrders: (updated: CateringOrder[]) => void;
+  onUpdateOrders: (updated: CateringOrder[], opts?: { fromCloud?: boolean }) => void;
   parentDishes: ParentDish[];
   recipes: DishRecipe[];
   petpoojaSales?: RawSalesRecord[];
@@ -71,7 +71,7 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data?.cateringOrders) && json.data.cateringOrders.length > 0) {
-          onUpdateOrders(json.data.cateringOrders);
+          onUpdateOrders(json.data.cateringOrders, { fromCloud: true });
           setCloudNotification(`Loaded ${json.data.cateringOrders.length} catering order(s) from Supabase!`);
           setTimeout(() => setCloudNotification(null), 4000);
         } else {

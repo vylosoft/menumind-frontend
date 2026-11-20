@@ -1124,7 +1124,7 @@ export async function syncDataToSupabase(payload: SyncPayload): Promise<{
         const grossVal = Number(order.grossOrderValue ?? order.agreedOrderValue) || 0;
         const discountVal = Number(order.discountAmount ?? order.customerDiscount) || 0;
         const gstVal = Number(order.gstAmount ?? order.taxAmount) || 0;
-        const netVal = Number(order.netOrderValue ?? order.netRecognizedValue ?? (grossVal - discountVal + (Number(order.additionalDeliveryCharges) || 0))) || 0;
+        const netVal = Number(order.netOrderValue ?? (grossVal - discountVal + (Number(order.additionalDeliveryCharges) || 0) + (Number(order.otherAgreedCharges) || 0))) || 0;
         const advVal = Number(order.advancePaymentAmount ?? order.advanceAmountCollected ?? order.totalAmountCollected) || 0;
         const balVal = Number(order.balanceAmount ?? order.remainingAmountDue ?? Math.max(0, netVal - advVal)) || 0;
         const outletIdVal = (order.outletId || 'whitefield').toLowerCase().trim() === 'banaswadi' ? 'banaswadi' : 'whitefield';
@@ -1701,10 +1701,22 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
       const discount = Number(r.discount_amount) || 0;
       const taxAmt = Number(r.gst_amount) || 0;
       const netVal = Number(r.net_order_value) || Math.max(0, grossVal - discount);
+      const extraCharges = Math.max(0, Math.round((netVal - Math.max(0, grossVal - discount)) * 100) / 100);
       const advAmt = Number(r.advance_payment_amount) || 0;
       const balAmt = Number(r.balance_amount) || Math.max(0, netVal - advAmt);
       const fulfills = r.fulfillment_status || 'Confirmed';
       const isCompleted = fulfills === 'Completed' || fulfills === 'Delivered';
+      const uiStatus =
+        fulfills === 'Draft' ? 'enquiry'
+        : fulfills === 'In Preparation' ? 'preparing'
+        : fulfills === 'Cancelled' ? 'cancelled'
+        : isCompleted ? 'completed'
+        : 'confirmed';
+      const payRaw = String(r.payment_status || '').toLowerCase();
+      const uiPayment =
+        payRaw.includes('unpaid') ? 'unpaid'
+        : payRaw.includes('fully') ? 'fully_paid'
+        : 'partially_paid';
 
       return {
         id: r.id,
@@ -1731,13 +1743,13 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
         netOrderValue: netVal,
         advancePaymentAmount: advAmt,
         balanceAmount: balAmt,
-        paymentStatus: r.payment_status || 'Partially Paid',
+        paymentStatus: uiPayment,
         fulfillmentStatus: fulfills,
 
         // Frontend CateringOrder model properties
         agreedOrderValue: grossVal,
         customerDiscount: discount,
-        additionalDeliveryCharges: 0,
+        additionalDeliveryCharges: extraCharges,
         otherAgreedCharges: 0,
         taxInclusive: true,
         taxRatePct: 5,
@@ -1748,7 +1760,7 @@ export async function loadDataFromSupabase(targetRestaurantId?: string): Promise
         totalAmountCollected: advAmt,
         refunds: 0,
         adjustments: 0,
-        status: isCompleted ? 'completed' : 'confirmed',
+        status: uiStatus,
         posInvoiceStatus: 'not_generated',
         gstClassification: '5% Restaurant (No ITC)',
         isTaxable: true,
