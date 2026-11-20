@@ -121,6 +121,20 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
     );
   }, [orders]);
 
+  // Months available in the data (always includes the default month)
+  const monthOptions = useMemo(() => {
+    const set = new Set<string>(['2026-10']);
+    orders.forEach((o) => {
+      const m = String(o.revenueRecognitionMonth || o.eventDate || '').slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(m)) set.add(m);
+    });
+    return Array.from(set).sort();
+  }, [orders]);
+  const monthLabel = (m: string) =>
+    m === 'all'
+      ? 'All months'
+      : new Date(`${m}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
   // Event category revenue breakdown
   const categoryBreakdown = useMemo(() => {
     const map: Record<string, number> = {};
@@ -129,7 +143,11 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
         if (outletFilter !== 'all' && o.outletId !== outletFilter) return false;
         if (!((o.status === 'completed' || o.status === 'fully_paid') && !o.duplicateConfirmed)) return false;
         // Same month rule as the summary cards above
-        return o.revenueRecognitionMonth === selectedMonth || String(o.eventDate || '').startsWith(selectedMonth);
+        return (
+          selectedMonth === 'all' ||
+          o.revenueRecognitionMonth === selectedMonth ||
+          String(o.eventDate || '').startsWith(selectedMonth)
+        );
       })
       .forEach((o) => {
         const totalDue =
@@ -198,6 +216,17 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
         </div>
 
         <div className="flex items-center gap-3 shrink-0 flex-wrap">
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="px-3 py-2.5 rounded-xl text-xs font-bold bg-slate-800 text-white border border-slate-700 cursor-pointer"
+            title="Month shown in the catering totals"
+          >
+            {monthOptions.map((m) => (
+              <option key={m} value={m}>{monthLabel(m)}</option>
+            ))}
+            <option value="all">All months</option>
+          </select>
           <button
             onClick={handlePullFromCloud}
             disabled={isPullingCloud}
@@ -313,7 +342,7 @@ export const BulkCateringDashboard: React.FC<BulkCateringDashboardProps> = ({
         <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
           <h3 className="text-base font-bold text-slate-900 flex items-center justify-between">
             <span>Catering by Kitchen Outlet</span>
-            <span className="text-xs font-normal text-slate-500">October 2026</span>
+            <span className="text-xs font-normal text-slate-500">{monthLabel(selectedMonth)}</span>
           </h3>
 
           <div className="space-y-3">

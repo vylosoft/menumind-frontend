@@ -125,7 +125,9 @@ export function computeCateringSummary(
 
   filtered.forEach((o) => {
     const isThisMonth =
-      o.revenueRecognitionMonth === selectedMonth || o.eventDate.startsWith(selectedMonth);
+      selectedMonth === 'all' ||
+      o.revenueRecognitionMonth === selectedMonth ||
+      String(o.eventDate || '').startsWith(selectedMonth);
 
     // Outstanding customer receivables
     const totalDue =
